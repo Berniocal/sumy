@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1722" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css" />
+  <title>Šumy (PWA)</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="dot"></div>
+      <div>
+        <div class="title">Šumy</div>
+        <div class="subtitle">white • pink • brown • presety</div>
+      </div>
+    </div>
+    <button id="installBtn" class="btn ghost" hidden>Instalovat</button>
+  </header>
+
+  <main class="wrap">
+    <section class="card">
+      <div class="row">
+        <div class="field">
+          <label for="mode">Režim</label>
+          <select id="mode">
+            <optgroup label="Základní šumy">
+              <option value="white">Bílý šum</option>
+              <option value="pink">Růžový šum</option>
+              <option value="brown">Hnědý šum</option>
+            </optgroup>
+            <optgroup label="Presety (simulace)">
+              <option value="waterfall">Vodopád</option>
+              <option value="wind">Vítr</option>
+              <option value="fan">Ventilátor</option>
+              <option value="vacuum">Vysavač</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="intensity">Intenzita / jemnost</label>
+          <input id="intensity" type="range" min="0" max="100" value="55" />
+          <div class="hint" id="intensityHint">střední</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="volume">Hlasitost</label>
+          <input id="volume" type="range" min="0" max="100" value="25" />
+          <div class="hint"><span id="volValue">25</span>%</div>
+        </div>
+
+        <div class="field">
+          <label for="timer">Sleep timer</label>
+          <select id="timer">
+            <option value="0">vypnuto</option>
+            <option value="5">5 min</option>
+            <option value="10">10 min</option>
+            <option value="15">15 min</option>
+            <option value="30">30 min</option>
+            <option value="45">45 min</option>
+            <option value="60">60 min</option>
+            <option value="90">90 min</option>
+          </select>
+          <div class="hint" id="timerHint">—</div>
+        </div>
+      </div>
+
+      <div class="row actions">
+        <button id="toggleBtn" class="btn primary">▶ Spustit</button>
+        <button id="stopBtn" class="btn" disabled>■ Stop</button>
+        <button id="fadeBtn" class="btn ghost" disabled>Fade out 10 s</button>
+      </div>
+
+      <div class="small" id="status">Připraveno. Klikni na Spustit.</div>
+    </section>
+
+    <section class="card">
+      <h2>Tipy</h2>
+      <ul class="list">
+        <li><b>Růžový</b> je “měkčí” než bílý (méně ostrých výšek).</li>
+        <li><b>Hnědý</b> je hodně do basů (často nejlepší na spánek).</li>
+        <li><b>Vodopád</b> = široké pásmo + jemné vlnění, “padající” dojem.</li>
+        <li>Když to bude příliš “agresivní”, stáhni <b>intenzitu</b> nebo přepni na <b>pink/brown</b>.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
