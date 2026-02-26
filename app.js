@@ -60,7 +60,10 @@ function addNode(n){
    ========================= */
 
 function closeSoundModal(){
+  // tvrdé schování (hidden + display)
   soundModal.hidden = true;
+  soundModal.style.display = "none";
+
   document.body.classList.remove("modalOpen");
   soundBtn?.setAttribute("aria-expanded", "false");
 
@@ -71,7 +74,10 @@ function closeSoundModal(){
 }
 
 function openSoundModal(){
+  // tvrdé zobrazení (display + hidden)
   soundModal.hidden = false;
+  soundModal.style.display = "flex";
+
   document.body.classList.add("modalOpen");
   soundBtn?.setAttribute("aria-expanded", "true");
 
