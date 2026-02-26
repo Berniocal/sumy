@@ -1,4 +1,4 @@
-/* app.js – čisté UI + modaly bez přesměrování + tvrdý STOP */
+/* app.js – pouze výběr zvuku + Play/Stop + intenzita + hlasitost */
 
 const $ = (id) => document.getElementById(id);
 
@@ -10,10 +10,6 @@ const statusEl   = $("status");
 
 const soundModal = $("soundModal");
 const soundClose = $("soundClose");
-
-const helpBtn    = $("helpBtn");
-const helpModal  = $("helpModal");
-const helpClose  = $("helpClose");
 
 const installBtn = $("installBtn");
 
@@ -60,44 +56,31 @@ function addNode(n){
 }
 
 /* =========================
-   MODALS (bez history triku)
+   Modal pouze pro výběr zvuku
    ========================= */
 
-const MODALS = [soundModal, helpModal];
-
-function closeAllModals(){
-  for (const m of MODALS){
-    if (!m) continue;
-    m.hidden = true;
-    if (m._onBackdrop){
-      m.removeEventListener("click", m._onBackdrop);
-      m._onBackdrop = null;
-    }
-  }
+function closeSoundModal(){
+  soundModal.hidden = true;
   document.body.classList.remove("modalOpen");
   soundBtn?.setAttribute("aria-expanded", "false");
+
+  if (soundModal._onBackdrop){
+    soundModal.removeEventListener("click", soundModal._onBackdrop);
+    soundModal._onBackdrop = null;
+  }
 }
 
-function openModal(modal){
-  // nikdy nedovol 2 modaly současně
-  closeAllModals();
-
-  modal.hidden = false;
+function openSoundModal(){
+  soundModal.hidden = false;
   document.body.classList.add("modalOpen");
+  soundBtn?.setAttribute("aria-expanded", "true");
 
   const onBackdrop = (e) => {
-    if (e.target === modal) closeAllModals();
+    if (e.target === soundModal) closeSoundModal();
   };
-  modal._onBackdrop = onBackdrop;
-  modal.addEventListener("click", onBackdrop);
+  soundModal._onBackdrop = onBackdrop;
+  soundModal.addEventListener("click", onBackdrop);
 }
-
-// Android back: když je otevřený modal, zavři ho a nenech to odjít pryč.
-// Nejjednodušší a bezpečné bez pushState: zachytit keydown ESC na desktopu,
-// a na mobilu to řeší uživatel křížkem / klikem mimo.
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeAllModals();
-});
 
 /* =========================
    AUDIO
@@ -144,6 +127,7 @@ function makeNoiseBuffer(type, seconds = 2){
     }
   }
 
+  // normalize
   let max = 0;
   for (let i=0; i<len; i++) max = Math.max(max, Math.abs(data[i]));
   if (max > 0) for (let i=0; i<len; i++) data[i] /= max;
@@ -164,11 +148,9 @@ function clearNodesHard(){
 
   hardMuteNow();
 
-  // stop sources
   for (const n of nodes){
     try{ if (typeof n.stop === "function") n.stop(0); }catch{}
   }
-  // disconnect all
   for (const n of nodes){
     try{ n.disconnect(); }catch{}
   }
@@ -264,7 +246,7 @@ function applyVolume(){
 }
 
 async function start(){
-  closeAllModals(); // při startu zavřít případné okno
+  closeSoundModal();
 
   await ensureAudio();
   try{ await ctx.resume(); }catch{}
@@ -288,7 +270,6 @@ async function stopHard(){
 
   clearNodesHard();
 
-  // mobilní jistota
   try{ await ctx.suspend(); }catch{}
   if (HARD_CLOSE_CONTEXT_ON_STOP){
     try{ await ctx.close(); }catch{}
@@ -315,18 +296,16 @@ function rebuildIfPlaying(){
    UI events
    ========================= */
 
-soundBtn.addEventListener("click", () => {
-  soundBtn.setAttribute("aria-expanded", "true");
-  openModal(soundModal);
-});
-soundClose.addEventListener("click", () => closeAllModals());
+soundBtn.addEventListener("click", () => openSoundModal());
+soundClose.addEventListener("click", () => closeSoundModal());
 
 soundModal.addEventListener("click", (e) => {
   const b = e.target.closest("[data-sound]");
   if (!b) return;
+
   currentSound = b.dataset.sound;
 
-  // bezpečně nastav text tlačítka
+  // nastav text na tlačítku
   const first = soundBtn.childNodes[0];
   if (first && first.nodeType === Node.TEXT_NODE){
     first.textContent = labelFor(currentSound) + " ";
@@ -335,12 +314,9 @@ soundModal.addEventListener("click", (e) => {
   }
 
   setStatus(labelFor(currentSound));
-  closeAllModals();
+  closeSoundModal();
   rebuildIfPlaying();
 });
-
-helpBtn.addEventListener("click", () => openModal(helpModal));
-helpClose.addEventListener("click", () => closeAllModals());
 
 toggleBtn.addEventListener("click", async () => {
   try{
@@ -357,7 +333,7 @@ volume.addEventListener("input", () => { if (isPlaying) applyVolume(); });
 
 document.addEventListener("visibilitychange", async () => {
   if (document.hidden){
-    closeAllModals();
+    closeSoundModal();
     if (isPlaying) await stopHard();
   }
 });
@@ -385,3 +361,4 @@ if (installBtn){
 soundBtn.childNodes[0].textContent = labelFor(currentSound) + " ";
 toggleBtn.textContent = "▶ Play";
 setStatus("Připraveno.");
+closeSoundModal();
