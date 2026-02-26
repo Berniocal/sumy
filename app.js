@@ -217,11 +217,17 @@ function buildChainFor(mode){
     hp.frequency.value = 40;
     lp.frequency.value = 1800 + 3500 * shape;
     addLFO(0.20, 0.18);
-  } else if (mode === "fan"){
-    hp.frequency.value = 60;
-    lp.frequency.value = 2200 + 5000 * shape;
-    addLFO(0.9, 0.05);
-  } else if (mode === "vacuum"){
+} else if (mode === "fan"){
+  // stabilní „ventilátor“: méně pumpování, hladší zvuk
+  hp.frequency.value = 70;                 // odřízne nejnižší dunění
+  lp.frequency.value = 1800 + 3200 * shape; // víc “whoosh”, méně syčení
+
+  // velmi jemné a pomalé vlnění, aby to nepůsobilo rozbitě
+  addLFO(0.25 + 0.25 * shape, 0.012 + 0.010 * shape);
+
+  // trochu stáhnout úroveň presetů, ať se to nedostane ke klipu
+  pre.gain.value = 0.85;
+} else if (mode === "vacuum"){
     hp.frequency.value = 120;
     lp.frequency.value = 5000 + 11000 * shape;
     addLFO(1.2, 0.04);
