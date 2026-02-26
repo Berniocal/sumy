@@ -19,7 +19,6 @@ body{
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
-/* když je otevřený modal, nechceme scroll/gesta pod ním */
 body.modalOpen{
   overflow:hidden;
   touch-action:none;
