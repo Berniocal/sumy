@@ -1,4 +1,4 @@
-/* app.js – Šumy (PWA) čisté UI + spolehlivé modaly + tvrdý STOP */
+/* app.js – čisté UI + modaly bez přesměrování + tvrdý STOP */
 
 const $ = (id) => document.getElementById(id);
 
@@ -22,11 +22,11 @@ let deferredPrompt = null;
 // Audio state
 let ctx = null;
 let masterGain = null;
-let sourceNodes = [];
+let nodes = [];              // everything we create so we can stop/disconnect
 let currentSound = "white";
 let isPlaying = false;
 
-// Když chceš naprosté ticho vždy a hned, dej true (Stop zavře AudioContext)
+// Pokud chceš absolutní jistotu ticha na všech mobilech, dej true (Stop zavře AudioContext)
 const HARD_CLOSE_CONTEXT_ON_STOP = false;
 
 function setStatus(t){ statusEl.textContent = t; }
@@ -55,12 +55,12 @@ function intensity01(){
 }
 
 function addNode(n){
-  sourceNodes.push(n);
+  nodes.push(n);
   return n;
 }
 
 /* =========================
-   MODALS (anti-zaseknutí)
+   MODALS (bez history triku)
    ========================= */
 
 const MODALS = [soundModal, helpModal];
@@ -78,29 +78,25 @@ function closeAllModals(){
   soundBtn?.setAttribute("aria-expanded", "false");
 }
 
-// otevři přes history, aby Android back zavřel modal
 function openModal(modal){
+  // nikdy nedovol 2 modaly současně
   closeAllModals();
+
   modal.hidden = false;
   document.body.classList.add("modalOpen");
 
   const onBackdrop = (e) => {
-    if (e.target === modal) {
-      // zavřít přes back, aby seděla historie
-      try{ history.back(); }catch{ closeAllModals(); }
-    }
+    if (e.target === modal) closeAllModals();
   };
   modal._onBackdrop = onBackdrop;
   modal.addEventListener("click", onBackdrop);
-
-  try{
-    history.pushState({ modal: true }, "");
-  }catch{}
 }
 
-window.addEventListener("popstate", () => {
-  // při back zavřeme modaly
-  closeAllModals();
+// Android back: když je otevřený modal, zavři ho a nenech to odjít pryč.
+// Nejjednodušší a bezpečné bez pushState: zachytit keydown ESC na desktopu,
+// a na mobilu to řeší uživatel křížkem / klikem mimo.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeAllModals();
 });
 
 /* =========================
@@ -122,7 +118,6 @@ function makeNoiseBuffer(type, seconds = 2){
   const buf = ctx.createBuffer(1, len, sr);
   const data = buf.getChannelData(0);
 
-  // white base
   for (let i=0; i<len; i++) data[i] = (Math.random() * 2 - 1);
 
   if (type === "pink"){
@@ -149,7 +144,6 @@ function makeNoiseBuffer(type, seconds = 2){
     }
   }
 
-  // normalize
   let max = 0;
   for (let i=0; i<len; i++) max = Math.max(max, Math.abs(data[i]));
   if (max > 0) for (let i=0; i<len; i++) data[i] /= max;
@@ -157,35 +151,34 @@ function makeNoiseBuffer(type, seconds = 2){
   return buf;
 }
 
-function clearNodesHard(){
-  if (!ctx || !masterGain) {
-    sourceNodes = [];
-    return;
-  }
-
-  // 1) okamžitě 0
+function hardMuteNow(){
+  if (!ctx || !masterGain) return;
   try{
     masterGain.gain.cancelScheduledValues(ctx.currentTime);
     masterGain.gain.setValueAtTime(0.0, ctx.currentTime);
   }catch{}
+}
 
-  // 2) stop všech zdrojů (bufferSource / osc)
-  for (const n of sourceNodes){
+function clearNodesHard(){
+  if (!ctx) { nodes = []; return; }
+
+  hardMuteNow();
+
+  // stop sources
+  for (const n of nodes){
     try{ if (typeof n.stop === "function") n.stop(0); }catch{}
   }
-
-  // 3) disconnect všech
-  for (const n of sourceNodes){
+  // disconnect all
+  for (const n of nodes){
     try{ n.disconnect(); }catch{}
   }
 
-  sourceNodes = [];
+  nodes = [];
 }
 
 function buildChainFor(mode){
   const shape = intensity01();
 
-  // base noise type
   const baseType =
     (mode === "pink" || mode === "waterfall" || mode === "wind" || mode === "rain") ? "pink" :
     (mode === "brown" || mode === "fan") ? "brown" :
@@ -206,11 +199,9 @@ function buildChainFor(mode){
   const pre = addNode(ctx.createGain());
   pre.gain.value = 1.0;
 
-  // modulační gain
   const modGain = addNode(ctx.createGain());
   modGain.gain.value = 1.0;
 
-  // LFO pro presety
   let lfo = null, lfoDepth = null;
   function addLFO(freqHz, depth){
     lfo = addNode(ctx.createOscillator());
@@ -220,15 +211,12 @@ function buildChainFor(mode){
     lfoDepth = addNode(ctx.createGain());
     lfoDepth.gain.value = depth;
 
-    // LFO přičítá do modGain.gain (kolem 1.0)
     modGain.gain.setValueAtTime(1.0, ctx.currentTime);
     lfo.connect(lfoDepth);
     lfoDepth.connect(modGain.gain);
-
     lfo.start();
   }
 
-  // Presety
   if (mode === "waterfall"){
     hp.frequency.value = 80;
     lp.frequency.value = 9000 + 7000 * shape;
@@ -260,7 +248,6 @@ function buildChainFor(mode){
     lp.frequency.value = 6000 + 10000 * shape;
   }
 
-  // chain
   src.connect(hp);
   hp.connect(lp);
   lp.connect(pre);
@@ -277,12 +264,12 @@ function applyVolume(){
 }
 
 async function start(){
+  closeAllModals(); // při startu zavřít případné okno
+
   await ensureAudio();
   try{ await ctx.resume(); }catch{}
 
-  // jistota: před startem vyčistit
   clearNodesHard();
-
   buildChainFor(currentSound);
   applyVolume();
 
@@ -292,7 +279,7 @@ async function start(){
 }
 
 async function stopHard(){
-  if (!ctx) {
+  if (!ctx){
     isPlaying = false;
     toggleBtn.textContent = "▶ Play";
     setStatus("Stop.");
@@ -301,7 +288,7 @@ async function stopHard(){
 
   clearNodesHard();
 
-  // Mobilní jistota: suspend / close
+  // mobilní jistota
   try{ await ctx.suspend(); }catch{}
   if (HARD_CLOSE_CONTEXT_ON_STOP){
     try{ await ctx.close(); }catch{}
@@ -315,53 +302,46 @@ async function stopHard(){
 }
 
 function rebuildIfPlaying(){
-  if (!isPlaying) return;
-  if (!ctx) return;
+  if (!isPlaying || !ctx) return;
 
-  // bezpečné přestavení bez „zbytků“
   const g = volToGain(Number(volume.value));
-  try{
-    masterGain.gain.cancelScheduledValues(ctx.currentTime);
-    masterGain.gain.setValueAtTime(0.0, ctx.currentTime);
-  }catch{}
-
+  hardMuteNow();
   clearNodesHard();
   buildChainFor(currentSound);
-
-  try{
-    masterGain.gain.setValueAtTime(g, ctx.currentTime);
-  }catch{}
+  masterGain.gain.setValueAtTime(g, ctx.currentTime);
 }
 
 /* =========================
    UI events
    ========================= */
 
-// Sound modal
 soundBtn.addEventListener("click", () => {
   soundBtn.setAttribute("aria-expanded", "true");
   openModal(soundModal);
 });
-soundClose.addEventListener("click", () => {
-  try{ history.back(); }catch{ closeAllModals(); }
-});
+soundClose.addEventListener("click", () => closeAllModals());
+
 soundModal.addEventListener("click", (e) => {
   const b = e.target.closest("[data-sound]");
   if (!b) return;
   currentSound = b.dataset.sound;
-  soundBtn.childNodes[0].textContent = labelFor(currentSound) + " ";
+
+  // bezpečně nastav text tlačítka
+  const first = soundBtn.childNodes[0];
+  if (first && first.nodeType === Node.TEXT_NODE){
+    first.textContent = labelFor(currentSound) + " ";
+  } else {
+    soundBtn.textContent = labelFor(currentSound);
+  }
+
   setStatus(labelFor(currentSound));
+  closeAllModals();
   rebuildIfPlaying();
-  try{ history.back(); }catch{ closeAllModals(); }
 });
 
-// Help modal
 helpBtn.addEventListener("click", () => openModal(helpModal));
-helpClose.addEventListener("click", () => {
-  try{ history.back(); }catch{ closeAllModals(); }
-});
+helpClose.addEventListener("click", () => closeAllModals());
 
-// Play/Stop button
 toggleBtn.addEventListener("click", async () => {
   try{
     if (!isPlaying) await start();
@@ -372,16 +352,9 @@ toggleBtn.addEventListener("click", async () => {
   }
 });
 
-// sliders
-intensity.addEventListener("input", () => {
-  rebuildIfPlaying();
-});
-volume.addEventListener("input", () => {
-  if (!isPlaying) return;
-  applyVolume();
-});
+intensity.addEventListener("input", () => rebuildIfPlaying());
+volume.addEventListener("input", () => { if (isPlaying) applyVolume(); });
 
-// když app jde do pozadí: ticho + zavřít modaly
 document.addEventListener("visibilitychange", async () => {
   if (document.hidden){
     closeAllModals();
@@ -408,7 +381,7 @@ if (installBtn){
   });
 }
 
-// init label (kdyby HTML mělo něco jiného)
-if (soundBtn) soundBtn.childNodes[0].textContent = labelFor(currentSound) + " ";
-setStatus("Připraveno.");
+/* init */
+soundBtn.childNodes[0].textContent = labelFor(currentSound) + " ";
 toggleBtn.textContent = "▶ Play";
+setStatus("Připraveno.");
