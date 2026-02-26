@@ -139,6 +139,9 @@ input[type="range"]{
   justify-content:center;
   padding: 18px;
 }
+.modal[hidden]{
+  display: none !important;
+}
 
 .modalCard{
   width: min(520px, 100%);
