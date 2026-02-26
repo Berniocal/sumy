@@ -1,6 +1,4 @@
-/* app.js – pouze výběr zvuku + Play/Stop + intenzita + hlasitost
-   Audio je zpět jako v 1. verzi: AudioWorklet (noise-worklet.js), bez smyčkování bufferu.
-*/
+/* app.js – pouze výběr zvuku + Play/Stop + intenzita + hlasitost */
 
 const $ = (id) => document.getElementById(id);
 
@@ -17,18 +15,15 @@ const installBtn = $("installBtn");
 
 let deferredPrompt = null;
 
-// Audio
+// Audio state
 let ctx = null;
-let masterGain = null;        // GainNode (volume)
-let noiseNode = null;         // AudioWorkletNode
-
-let presetFilter1 = null;     // BiquadFilterNode
-let presetFilter2 = null;     // BiquadFilterNode
-let lfo = null;               // OscillatorNode
-let lfoGain = null;           // GainNode (mod depth)
-
+let masterGain = null;
+let nodes = [];              // everything we create so we can stop/disconnect
 let currentSound = "white";
 let isPlaying = false;
+
+// Pokud chceš absolutní jistotu ticha na všech mobilech, dej true (Stop zavře AudioContext)
+const HARD_CLOSE_CONTEXT_ON_STOP = false;
 
 function setStatus(t){ statusEl.textContent = t; }
 
@@ -55,13 +50,17 @@ function intensity01(){
   return Math.max(0, Math.min(1, Number(intensity.value) / 100));
 }
 
+function addNode(n){
+  nodes.push(n);
+  return n;
+}
+
 /* =========================
    Modal pouze pro výběr zvuku
    ========================= */
 
 function closeSoundModal(){
   soundModal.hidden = true;
-  soundModal.style.display = "none";
   document.body.classList.remove("modalOpen");
   soundBtn?.setAttribute("aria-expanded", "false");
 
@@ -73,7 +72,6 @@ function closeSoundModal(){
 
 function openSoundModal(){
   soundModal.hidden = false;
-  soundModal.style.display = "flex";
   document.body.classList.add("modalOpen");
   soundBtn?.setAttribute("aria-expanded", "true");
 
@@ -85,64 +83,160 @@ function openSoundModal(){
 }
 
 /* =========================
-   AUDIO (worklet jako v 1. verzi)
+   AUDIO
    ========================= */
 
-function hardMuteNow(){
-  if (!ctx || !masterGain) return;
-  const t = ctx.currentTime;
-  try{
-    masterGain.gain.cancelScheduledValues(t);
-    masterGain.gain.setValueAtTime(0.0, t);
-  }catch{}
-}
-
-function disconnectChain(){
-  // odpoj šum a presety, zastav LFO
-  try{ noiseNode?.disconnect(); }catch{}
-  try{ presetFilter1?.disconnect(); }catch{}
-  try{ presetFilter2?.disconnect(); }catch{}
-
-  try{ lfoGain?.disconnect(); }catch{}
-  try{ lfo?.stop(); }catch{}
-  try{ lfo?.disconnect(); }catch{}
-
-  presetFilter1 = null;
-  presetFilter2 = null;
-  lfo = null;
-  lfoGain = null;
-}
-
 async function ensureAudio(){
-  if (ctx && masterGain && noiseNode) return;
+  if (ctx && masterGain) return;
 
   ctx = new (window.AudioContext || window.webkitAudioContext)();
-
   masterGain = ctx.createGain();
   masterGain.gain.value = 0.0;
   masterGain.connect(ctx.destination);
-
-  await ctx.audioWorklet.addModule("noise-worklet.js");
-  noiseNode = new AudioWorkletNode(ctx, "noise-processor", {
-    numberOfInputs: 0,
-    numberOfOutputs: 1,
-    outputChannelCount: [2],
-  });
 }
 
-function mapModeToNoiseType(mode){
-  // worklet: 0=white, 1=pink, 2=brown
-  if (mode === "pink") return 1;
-  if (mode === "brown") return 2;
+function makeNoiseBuffer(type, seconds = 2){
+  const sr = ctx.sampleRate;
+  const len = Math.max(1, Math.floor(seconds * sr));
+  const buf = ctx.createBuffer(1, len, sr);
+  const data = buf.getChannelData(0);
 
-  // presety: zvolíme „příjemnější“ základ
-  if (mode === "waterfall") return 1;
-  if (mode === "rain") return 1;
-  if (mode === "wind") return 1;
-  if (mode === "fan") return 2;
-  if (mode === "vacuum") return 0;
+  for (let i=0; i<len; i++) data[i] = (Math.random() * 2 - 1);
 
-  return 0;
+  if (type === "pink"){
+    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+    for (let i=0; i<len; i++){
+      const w = data[i];
+      b0 = 0.99886 * b0 + w * 0.0555179;
+      b1 = 0.99332 * b1 + w * 0.0750759;
+      b2 = 0.96900 * b2 + w * 0.1538520;
+      b3 = 0.86650 * b3 + w * 0.3104856;
+      b4 = 0.55000 * b4 + w * 0.5329522;
+      b5 = -0.7616 * b5 - w * 0.0168980;
+      const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362;
+      b6 = w * 0.115926;
+      data[i] = pink * 0.11;
+    }
+  }
+
+  if (type === "brown"){
+    let last = 0;
+    for (let i=0; i<len; i++){
+      last = (last + data[i] * 0.02);
+      data[i] = Math.max(-1, Math.min(1, last)) * 3.5;
+    }
+  }
+
+  // normalize
+  let max = 0;
+  for (let i=0; i<len; i++) max = Math.max(max, Math.abs(data[i]));
+  if (max > 0) for (let i=0; i<len; i++) data[i] /= max;
+
+  return buf;
+}
+
+function hardMuteNow(){
+  if (!ctx || !masterGain) return;
+  try{
+    masterGain.gain.cancelScheduledValues(ctx.currentTime);
+    masterGain.gain.setValueAtTime(0.0, ctx.currentTime);
+  }catch{}
+}
+
+function clearNodesHard(){
+  if (!ctx) { nodes = []; return; }
+
+  hardMuteNow();
+
+  for (const n of nodes){
+    try{ if (typeof n.stop === "function") n.stop(0); }catch{}
+  }
+  for (const n of nodes){
+    try{ n.disconnect(); }catch{}
+  }
+
+  nodes = [];
+}
+
+function buildChainFor(mode){
+  const shape = intensity01();
+
+  const baseType =
+    (mode === "pink" || mode === "waterfall" || mode === "wind" || mode === "rain") ? "pink" :
+    (mode === "brown" || mode === "fan") ? "brown" :
+    "white";
+
+  const src = addNode(ctx.createBufferSource());
+  src.buffer = makeNoiseBuffer(baseType, 2);
+  src.loop = true;
+
+  const hp = addNode(ctx.createBiquadFilter());
+  hp.type = "highpass";
+  hp.frequency.value = 10;
+
+  const lp = addNode(ctx.createBiquadFilter());
+  lp.type = "lowpass";
+  lp.frequency.value = 600 + 15000 * shape;
+
+  const pre = addNode(ctx.createGain());
+  pre.gain.value = 1.0;
+
+  const modGain = addNode(ctx.createGain());
+  modGain.gain.value = 1.0;
+
+  let lfo = null, lfoDepth = null;
+  function addLFO(freqHz, depth){
+    lfo = addNode(ctx.createOscillator());
+    lfo.type = "sine";
+    lfo.frequency.value = freqHz;
+
+    lfoDepth = addNode(ctx.createGain());
+    lfoDepth.gain.value = depth;
+
+    modGain.gain.setValueAtTime(1.0, ctx.currentTime);
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(modGain.gain);
+    lfo.start();
+  }
+
+  if (mode === "waterfall"){
+    hp.frequency.value = 80;
+    lp.frequency.value = 9000 + 7000 * shape;
+    addLFO(0.35, 0.10);
+  } else if (mode === "rain"){
+    hp.frequency.value = 250;
+    lp.frequency.value = 7000 + 9000 * shape;
+    addLFO(0.6, 0.06);
+  } else if (mode === "wind"){
+    hp.frequency.value = 40;
+    lp.frequency.value = 1800 + 3500 * shape;
+    addLFO(0.20, 0.18);
+  } else if (mode === "fan"){
+    hp.frequency.value = 60;
+    lp.frequency.value = 2200 + 5000 * shape;
+    addLFO(0.9, 0.05);
+  } else if (mode === "vacuum"){
+    hp.frequency.value = 120;
+    lp.frequency.value = 5000 + 11000 * shape;
+    addLFO(1.2, 0.04);
+  } else if (mode === "pink"){
+    hp.frequency.value = 10;
+    lp.frequency.value = 3500 + 9000 * shape;
+  } else if (mode === "brown"){
+    hp.frequency.value = 10;
+    lp.frequency.value = 1400 + 6000 * shape;
+  } else { // white
+    hp.frequency.value = 10;
+    lp.frequency.value = 6000 + 10000 * shape;
+  }
+
+  src.connect(hp);
+  hp.connect(lp);
+  lp.connect(pre);
+  pre.connect(modGain);
+  modGain.connect(masterGain);
+
+  src.start();
 }
 
 function applyVolume(){
@@ -151,134 +245,13 @@ function applyVolume(){
   masterGain.gain.setValueAtTime(g, ctx.currentTime);
 }
 
-function buildChainFor(mode){
-  if (!ctx || !noiseNode || !masterGain) return;
-
-  const shape = intensity01();
-
-  // vždy nejdřív čistě odpojit starý řetězec
-  disconnectChain();
-
-  // nastavit typ + „jemnost“ (level)
-  const baseLevel = 0.18 + 0.35 * shape;
-  noiseNode.parameters.get("type").setValueAtTime(mapModeToNoiseType(mode), ctx.currentTime);
-  noiseNode.parameters.get("level").setValueAtTime(baseLevel, ctx.currentTime);
-
-  presetFilter1 = ctx.createBiquadFilter();
-  presetFilter2 = ctx.createBiquadFilter();
-  presetFilter1.type = "allpass";
-  presetFilter2.type = "allpass";
-
-  // LFO – velmi jemné „živé“ vlnění
-  lfo = ctx.createOscillator();
-  lfoGain = ctx.createGain();
-  lfo.type = "sine";
-  lfo.frequency.value = 0.15;
-  lfoGain.gain.value = 0.0;
-
-  // chain: noise -> f1 -> f2 -> masterGain
-  noiseNode.connect(presetFilter1);
-  presetFilter1.connect(presetFilter2);
-  presetFilter2.connect(masterGain);
-
-  // LFO -> masterGain.gain
-  try{
-    lfo.connect(lfoGain);
-    lfoGain.connect(masterGain.gain);
-  }catch{}
-
-  // Základní šumy (jemné vyhlazení)
-  if (mode === "white" || mode === "pink" || mode === "brown"){
-    presetFilter1.type = "lowpass";
-    presetFilter1.frequency.value = 8000 - 5500 * (1 - shape);
-    presetFilter1.Q.value = 0.2;
-
-    presetFilter2.type = "highpass";
-    presetFilter2.frequency.value = 20 + 80 * shape;
-    presetFilter2.Q.value = 0.1;
-
-    lfo.frequency.value = 0.08 + 0.22 * shape;
-    lfoGain.gain.value = 0.00 + 0.02 * shape;
-  }
-
-  if (mode === "waterfall"){
-    presetFilter1.type = "bandpass";
-    presetFilter1.frequency.value = 800 + 900 * shape;
-    presetFilter1.Q.value = 0.4 + 0.9 * shape;
-
-    presetFilter2.type = "highshelf";
-    presetFilter2.frequency.value = 2500;
-    presetFilter2.gain.value = -6 + 2 * shape;
-
-    lfo.frequency.value = 0.12 + 0.35 * shape;
-    lfoGain.gain.value = 0.01 + 0.03 * shape;
-  }
-
-  if (mode === "rain"){
-    // podobné jako „pink“ + jemné zrnění ve výškách
-    presetFilter1.type = "highpass";
-    presetFilter1.frequency.value = 180 + 420 * shape;
-    presetFilter1.Q.value = 0.25;
-
-    presetFilter2.type = "lowpass";
-    presetFilter2.frequency.value = 6500 + 9000 * shape;
-    presetFilter2.Q.value = 0.3;
-
-    lfo.frequency.value = 0.35 + 0.35 * shape;
-    lfoGain.gain.value = 0.004 + 0.010 * shape;
-  }
-
-  if (mode === "wind"){
-    presetFilter1.type = "lowpass";
-    presetFilter1.frequency.value = 600 + 900 * shape;
-    presetFilter1.Q.value = 0.6;
-
-    presetFilter2.type = "highpass";
-    presetFilter2.frequency.value = 40 + 120 * shape;
-    presetFilter2.Q.value = 0.2;
-
-    lfo.frequency.value = 0.05 + 0.18 * shape;
-    lfoGain.gain.value = 0.03 + 0.06 * shape;
-  }
-
-  if (mode === "fan"){
-    // stejné ladění jako původní 1. verze
-    presetFilter1.type = "lowpass";
-    presetFilter1.frequency.value = 300 + 550 * shape;
-    presetFilter1.Q.value = 0.9;
-
-    presetFilter2.type = "peaking";
-    presetFilter2.frequency.value = 120 + 120 * shape;
-    presetFilter2.Q.value = 1.2;
-    presetFilter2.gain.value = 2 + 4 * shape;
-
-    lfo.frequency.value = 0.9 + 1.6 * shape;
-    lfoGain.gain.value = 0.005 + 0.015 * shape;
-  }
-
-  if (mode === "vacuum"){
-    presetFilter1.type = "highpass";
-    presetFilter1.frequency.value = 120 + 220 * shape;
-    presetFilter1.Q.value = 0.6;
-
-    presetFilter2.type = "highshelf";
-    presetFilter2.frequency.value = 1500;
-    presetFilter2.gain.value = 2 + 6 * shape;
-
-    lfo.frequency.value = 0.25;
-    lfoGain.gain.value = 0.004;
-  }
-
-  try{ lfo.start(); }catch{}
-}
-
 async function start(){
   closeSoundModal();
 
   await ensureAudio();
-  if (ctx.state === "suspended") await ctx.resume();
+  try{ await ctx.resume(); }catch{}
 
-  // postavit řetězec + hlasitost
+  clearNodesHard();
   buildChainFor(currentSound);
   applyVolume();
 
@@ -288,13 +261,21 @@ async function start(){
 }
 
 async function stopHard(){
-  if (!ctx) return;
+  if (!ctx){
+    isPlaying = false;
+    toggleBtn.textContent = "▶ Play";
+    setStatus("Stop.");
+    return;
+  }
 
-  // absolutní ticho
-  hardMuteNow();
-  disconnectChain();
+  clearNodesHard();
 
   try{ await ctx.suspend(); }catch{}
+  if (HARD_CLOSE_CONTEXT_ON_STOP){
+    try{ await ctx.close(); }catch{}
+    ctx = null;
+    masterGain = null;
+  }
 
   isPlaying = false;
   toggleBtn.textContent = "▶ Play";
@@ -304,10 +285,11 @@ async function stopHard(){
 function rebuildIfPlaying(){
   if (!isPlaying || !ctx) return;
 
-  // přestavět preset (po změně zvuku/intenzity) bez „zbytků“
+  const g = volToGain(Number(volume.value));
   hardMuteNow();
+  clearNodesHard();
   buildChainFor(currentSound);
-  applyVolume();
+  masterGain.gain.setValueAtTime(g, ctx.currentTime);
 }
 
 /* =========================
@@ -349,10 +331,11 @@ toggleBtn.addEventListener("click", async () => {
 intensity.addEventListener("input", () => rebuildIfPlaying());
 volume.addEventListener("input", () => { if (isPlaying) applyVolume(); });
 
-document.addEventListener("visibilitychange", async () => {
+document.addEventListener("visibilitychange", () => {
   if (document.hidden){
+    // Nezastavujeme audio – ať může hrát na pozadí / při zhasnuté obrazovce.
+    // Jen zavřeme případné otevřené okno.
     closeSoundModal();
-    if (isPlaying) await stopHard();
   }
 });
 
