@@ -39,6 +39,12 @@ let noiseNode = null;         // AudioWorkletNode
 // Real audio loop (waterfalls)
 let realWaterfallBuffer = null;
 let realWaterfallBufferPromise = null;
+
+let realSeaBuffer = null;
+let realSeaBufferPromise = null;
+
+let realWindBuffer = null;
+let realWindBufferPromise = null;
 let fileSource = null;
 
 
@@ -158,6 +164,8 @@ function labelFor(mode){
     case "brown": return "Hnědý šum";
     case "waterfall": return "Vodopád";
     case "waterfall_real": return "Vodopády (real)";
+    case "sea_real": return "Moře (real)";
+    case "wind_real": return "Vítr (real)";
     case "rain": return "Déšť";
     case "wind": return "Vítr";
     case "fan": return "Ventilátor";
@@ -385,7 +393,7 @@ function hardMuteNow(){
 }
 
 function disconnectChain(){
-  // zastav přehrávání WAV smyčky (pokud běží)
+  // zastav přehrávání MP3 smyčky (pokud běží)
   try{ fileSource?.stop(); }catch{}
   try{ fileSource?.disconnect(); }catch{}
   fileSource = null;
@@ -428,9 +436,9 @@ async function ensureRealWaterfallBuffer(){
   if (realWaterfallBuffer) return realWaterfallBuffer;
 
   if (!realWaterfallBufferPromise){
-    realWaterfallBufferPromise = fetch("waterfall-real.wav")
+    realWaterfallBufferPromise = fetch("waterfall-real.mp3")
       .then((r) => {
-        if (!r.ok) throw new Error("Nelze načíst waterfall-real.wav");
+        if (!r.ok) throw new Error("Nelze načíst waterfall-real.mp3");
         return r.arrayBuffer();
       })
       .then((ab) => ctx.decodeAudioData(ab))
@@ -447,6 +455,57 @@ async function ensureRealWaterfallBuffer(){
 
   return realWaterfallBufferPromise;
 }
+
+function ensureRealSeaBuffer(){
+  if (realSeaBuffer) return realSeaBuffer;
+  if (realSeaBuffer) return realSeaBuffer;
+
+  if (!realSeaBufferPromise){
+    realSeaBufferPromise = fetch("sea-real.mp3")
+      .then((r) => {
+        if (!r.ok) throw new Error("Nelze načíst sea-real.mp3");
+        return r.arrayBuffer();
+      })
+      .then((ab) => ctx.decodeAudioData(ab))
+      .then((buf) => {
+        realSeaBuffer = buf;
+        return buf;
+      })
+      .catch((err) => {
+        console.error(err);
+        realSeaBufferPromise = null;
+        return null;
+      });
+  }
+
+  return realSeaBufferPromise;
+}
+
+function ensureRealWindBuffer(){
+  if (realWindBuffer) return realWindBuffer;
+  if (realWindBuffer) return realWindBuffer;
+
+  if (!realWindBufferPromise){
+    realWindBufferPromise = fetch("wind-real.mp3")
+      .then((r) => {
+        if (!r.ok) throw new Error("Nelze načíst wind-real.mp3");
+        return r.arrayBuffer();
+      })
+      .then((ab) => ctx.decodeAudioData(ab))
+      .then((buf) => {
+        realWindBuffer = buf;
+        return buf;
+      })
+      .catch((err) => {
+        console.error(err);
+        realWindBufferPromise = null;
+        return null;
+      });
+  }
+
+  return realWindBufferPromise;
+}
+
 
 function mapModeToNoiseType(mode){
   // worklet: 0=white, 1=pink, 2=brown
@@ -477,7 +536,7 @@ function buildChainFor(mode){
   // vždy nejdřív čistě odpojit starý řetězec
   disconnectChain();
 
-// === Vodopady (real) - WAV loop ===
+// === Vodopady (real) - MP3 loop ===
 if (mode === "waterfall_real"){
   // Buffer musi byt nacteny (zajišťuje start() / rebuildIfPlaying())
   if (!realWaterfallBuffer){
@@ -499,6 +558,68 @@ if (mode === "waterfall_real"){
 
   fileSource = ctx.createBufferSource();
   fileSource.buffer = realWaterfallBuffer;
+  fileSource.loop = true;
+
+  fileSource.connect(presetFilter1);
+  presetFilter1.connect(presetFilter2);
+  presetFilter2.connect(masterGain);
+
+  try{ fileSource.start(); }catch{}
+  return;
+}
+
+// === Moře (real) - MP3 loop ===
+if (mode === "sea_real"){
+  if (!realSeaBuffer){
+    setStatus("Nacitam more...");
+    return;
+  }
+
+  presetFilter1 = ctx.createBiquadFilter();
+  presetFilter2 = ctx.createBiquadFilter();
+
+  // Moře: víc basů, méně sykavek
+  presetFilter1.type = "lowpass";
+  presetFilter1.frequency.value = 1200 + 2800 * shape; // 1.2–4.0 kHz
+  presetFilter1.Q.value = 0.35;
+
+  presetFilter2.type = "highpass";
+  presetFilter2.frequency.value = 15 + 50 * shape; // 15–65 Hz
+  presetFilter2.Q.value = 0.25;
+
+  fileSource = ctx.createBufferSource();
+  fileSource.buffer = realSeaBuffer;
+  fileSource.loop = true;
+
+  fileSource.connect(presetFilter1);
+  presetFilter1.connect(presetFilter2);
+  presetFilter2.connect(masterGain);
+
+  try{ fileSource.start(); }catch{}
+  return;
+}
+
+// === Vítr (real) - MP3 loop ===
+if (mode === "wind_real"){
+  if (!realWindBuffer){
+    setStatus("Nacitam vitr...");
+    return;
+  }
+
+  presetFilter1 = ctx.createBiquadFilter();
+  presetFilter2 = ctx.createBiquadFilter();
+
+  // Vítr: potlačit basy (rumble) a hodně kontrolovat výšky podle intensity
+  presetFilter1.type = "highpass";
+  presetFilter1.frequency.value = 60 + 220 * shape; // 60–280 Hz
+  presetFilter1.Q.value = 0.35;
+
+  presetFilter2.type = "lowpass";
+  presetFilter2.frequency.value = 1500 + 6000 * shape; // 1.5–7.5 kHz
+  presetFilter2.Q.value = 0.35;
+
+  fileSource = ctx.createBufferSource();
+  fileSource.buffer = realWindBuffer;
   fileSource.loop = true;
 
   fileSource.connect(presetFilter1);
@@ -630,13 +751,18 @@ async function start(){
   if (ctx.state === "suspended") await ctx.resume();
 
   // postavit řetězec + hlasitost
-  // pro real vodopady si nejdriv nacti WAV buffer
+  // pro real nahrávky si nejdřív načti MP3 buffer
   if (currentSound === "waterfall_real"){
     const buf = await ensureRealWaterfallBuffer();
-    if (!buf){
-      // fallback na synteticky vodopad
-      currentSound = "waterfall";
-    }
+    if (!buf) currentSound = "waterfall";
+  }
+  if (currentSound === "sea_real"){
+    const buf = await ensureRealSeaBuffer();
+    if (!buf) currentSound = "waterfall";
+  }
+  if (currentSound === "wind_real"){
+    const buf = await ensureRealWindBuffer();
+    if (!buf) currentSound = "wind";
   }
   buildChainFor(currentSound);
   applyVolume();
@@ -672,12 +798,18 @@ async function rebuildIfPlaying(){
 
   // přestavět preset (po změně zvuku/intenzity) bez „zbytků“
   hardMuteNow();
-// pro real vodopady si nejdriv nacti WAV buffer
+// pro real nahrávky si nejdřív načti MP3 buffer
 if (currentSound === "waterfall_real"){
   const buf = await ensureRealWaterfallBuffer();
-  if (!buf){
-    currentSound = "waterfall";
-  }
+  if (!buf) currentSound = "waterfall";
+}
+if (currentSound === "sea_real"){
+  const buf = await ensureRealSeaBuffer();
+  if (!buf) currentSound = "waterfall";
+}
+if (currentSound === "wind_real"){
+  const buf = await ensureRealWindBuffer();
+  if (!buf) currentSound = "wind";
 }
 
   buildChainFor(currentSound);
