@@ -1,5 +1,5 @@
 /* sw.js */
-const CACHE_NAME = "noise-pwa-v13";
+const CACHE_NAME = "noise-pwa-v14";
 const ASSETS = [
   "./",
   "./index.html",
