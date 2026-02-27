@@ -842,3 +842,52 @@ setStatus("Připraveno.");
 closeSoundModal();
 closeTimerModal();
 updateTimerUI();
+
+
+// Service Worker (offline + aktualizace)
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", async () => {
+    try {
+      const reg = await navigator.serviceWorker.register("./sw.js");
+
+      // Když už je nová verze připravená (waiting), nabídneme reload
+      function promptUpdate() {
+        if (!reg.waiting) return;
+        const ok = confirm("Je dostupná nová verze aplikace. Načíst teď? (při offline to nevadí)");
+        if (ok) {
+          reg.waiting.postMessage({ type: "SKIP_WAITING" });
+        }
+      }
+
+      reg.addEventListener("updatefound", () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener("statechange", () => {
+          // nový SW je nainstalovaný, ale čeká na převzetí
+          if (nw.state === "installed" && navigator.serviceWorker.controller) {
+            promptUpdate();
+          }
+        });
+      });
+
+      // Pokud při registraci už čeká update
+      promptUpdate();
+
+      // Po převzetí kontroleru reloadneme, aby běžela nová verze
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        window.location.reload();
+      });
+
+      // Průběžná kontrola aktualizací (když se appka otevře / vrátí do popředí)
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") reg.update().catch(() => {});
+      });
+
+      // A jednou za 30 minut při běhu stránky (nezatěžuje)
+      setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+    } catch (e) {
+      // SW není kritický – app může běžet i bez něj (jen nebude offline)
+      console.warn("SW register failed", e);
+    }
+  });
+}
