@@ -11,6 +11,7 @@ const ASSETS = [
   "./app.js",
   "./noise-worklet.js",
   "./manifest.webmanifest",
+  "./waterfall-real.wav",
   "./icons/icon.svg",
   "./icons/maskable.svg"
 ];
