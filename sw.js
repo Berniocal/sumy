@@ -3,7 +3,7 @@
    - Update: pro stejné origin soubory vracíme cache hned, ale na pozadí dotahujeme novou verzi a ukládáme do cache.
    - UI může vynutit okamžitou aktivaci přes message {type:'SKIP_WAITING'}.
 */
-const CACHE_NAME = "noise-pwa-v22";
+const CACHE_NAME = "noise-pwa-v23";
 const ASSETS = [
   "./",
   "./index.html",
