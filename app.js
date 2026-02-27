@@ -578,6 +578,15 @@ if (mode === "waterfall_real"){
   fileSource.buffer = realWaterfallBuffer;
   fileSource.loop = true;
 
+  // Gapless loop (skryje MP3 padding na konci/zacatku)
+  try{
+    const d = realWaterfallBuffer.duration;
+    if (d > 0.2){
+      fileSource.loopStart = 0.05;
+      fileSource.loopEnd = Math.max(0.051, d - 0.05);
+    }
+  }catch{}
+
   // Bez úprav zvuku: přímo do masterGain (hlasitosť)
   fileSource.connect(masterGain);
 
@@ -594,6 +603,15 @@ if (mode === "sea_real"){
   fileSource = ctx.createBufferSource();
   fileSource.buffer = realSeaBuffer;
   fileSource.loop = true;
+
+  // Gapless loop (skryje MP3 padding na konci/zacatku)
+  try{
+    const d = realSeaBuffer.duration;
+    if (d > 0.2){
+      fileSource.loopStart = 0.05;
+      fileSource.loopEnd = Math.max(0.051, d - 0.05);
+    }
+  }catch{}
 
   // Bez úprav zvuku: přímo do masterGain (hlasitosť)
   fileSource.connect(masterGain);
@@ -612,6 +630,15 @@ if (mode === "wind_real"){
   fileSource.buffer = realWindBuffer;
   fileSource.loop = true;
 
+  // Gapless loop (skryje MP3 padding na konci/zacatku)
+  try{
+    const d = realWindBuffer.duration;
+    if (d > 0.2){
+      fileSource.loopStart = 0.05;
+      fileSource.loopEnd = Math.max(0.051, d - 0.05);
+    }
+  }catch{}
+
   // Bez úprav zvuku: přímo do masterGain (hlasitosť)
   fileSource.connect(masterGain);
 
@@ -628,6 +655,15 @@ if (mode === "rain_real"){
   fileSource = ctx.createBufferSource();
   fileSource.buffer = realRainBuffer;
   fileSource.loop = true;
+
+  // Gapless loop (skryje MP3 padding na konci/zacatku)
+  try{
+    const d = realRainBuffer.duration;
+    if (d > 0.2){
+      fileSource.loopStart = 0.05;
+      fileSource.loopEnd = Math.max(0.051, d - 0.05);
+    }
+  }catch{}
 
   // Bez úprav zvuku: přímo do masterGain (hlasitosť)
   fileSource.connect(masterGain);
