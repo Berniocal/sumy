@@ -48,144 +48,13 @@ let realRainBufferPromise = null;
 
 let realWindBuffer = null;
 let realWindBufferPromise = null;
+
+// Real loop points (auto-trim silence at start/end)
+let realWaterfallLoop = null;
+let realSeaLoop = null;
+let realWindLoop = null;
+let realRainLoop = null;
 let fileSource = null;
-
-  // zastav i seamless smyčku pro "real" nahrávky
-  stopRealSeamlessLoop();
-
-// === Seamless loop pro "real" nahrávky (bez slyšitelné mezery) ===
-let realLoopController = null;
-
-function stopRealSeamlessLoop(){
-  if (realLoopController){
-    try{ realLoopController.stop(); }catch{}
-    realLoopController = null;
-  }
-}
-
-function detectTrimLoopPoints(buffer){
-  // Najde dlouhé ticho na začátku/konci (typicky u "minutových" MP3) a ořízne ho pro smyčku.
-  // Pozor: přírodní zvuky jsou "tiché", takže práh je relativní vůči pozadí.
-  try{
-    const sr = buffer.sampleRate;
-    const ch = buffer.getChannelData(0);
-    const frameSec = 0.05; // 50 ms
-    const frame = Math.max(256, Math.floor(sr * frameSec));
-    const n = Math.floor(ch.length / frame);
-    if (n < 10) return { start: 0.02, end: Math.max(0.03, buffer.duration - 0.02) };
-
-    const rms = new Float32Array(n);
-    for (let i = 0; i < n; i++){
-      let sum = 0;
-      const base = i * frame;
-      for (let j = 0; j < frame; j++){
-        const v = ch[base + j];
-        sum += v * v;
-      }
-      rms[i] = Math.sqrt(sum / frame);
-    }
-
-    const arr = Array.from(rms).sort((a,b)=>a-b);
-    const floor = arr[Math.floor(arr.length * 0.10)] || 0; // 10. percentil = šumové pozadí
-    const thr = Math.max(floor * 3.0, 1e-4);               // relativní práh
-
-    // nech trochu rezervu, ať se neusekne náběh
-    let first = 0;
-    for (let i = 0; i < n; i++){
-      if (rms[i] > thr){ first = i; break; }
-    }
-    let last = n - 1;
-    for (let i = n - 1; i >= 0; i--){
-      if (rms[i] > thr){ last = i; break; }
-    }
-
-    // pokud to vypadá "celé hlasité" (bez ticha), jen skryj MP3 padding v řádu ms
-    if (last - first < 3){
-      return { start: 0.02, end: Math.max(0.03, buffer.duration - 0.02) };
-    }
-
-    let start = Math.max(0, (first - 1) * frame / sr);
-    let end   = Math.min(buffer.duration, (last + 1) * frame / sr);
-
-    // ještě maličko dovnitř kvůli MP3 paddingu
-    start = Math.min(start + 0.02, Math.max(0, buffer.duration - 0.2));
-    end   = Math.max(start + 0.5, end - 0.02);
-
-    // pojistky
-    if (end - start < 1.0){
-      start = 0.02;
-      end = Math.max(0.03, buffer.duration - 0.02);
-    }
-
-    return { start, end };
-  }catch{
-    return { start: 0.02, end: Math.max(0.03, buffer.duration - 0.02) };
-  }
-}
-
-function startRealSeamlessLoop(buffer){
-  // Crossfade smyčka: hraje segment [start..end] a u konce plynule přimíchá nový start,
-  // takže zmizí i dlouhé ticho a nevznikne cvaknutí.
-  if (!ctx || !masterGain) return;
-
-  stopRealSeamlessLoop();
-
-  const pts = detectTrimLoopPoints(buffer);
-  const seg = Math.max(0.5, pts.end - pts.start);
-
-  // plynulé navázání (u přírodních zvuků funguje dobře)
-  const fade = Math.min(0.40, seg / 4); // max 0.4 s
-
-  let stopped = false;
-  let sources = [];
-
-  let nextTime = ctx.currentTime + 0.05;
-
-  const scheduleOne = () => {
-    if (stopped) return;
-
-    const s = ctx.createBufferSource();
-    s.buffer = buffer;
-
-    const g = ctx.createGain();
-    s.connect(g);
-    g.connect(masterGain);
-
-    // fade in/out kolem překryvu
-    g.gain.setValueAtTime(0.0, nextTime);
-    g.gain.linearRampToValueAtTime(1.0, nextTime + fade);
-    g.gain.setValueAtTime(1.0, nextTime + seg - fade);
-    g.gain.linearRampToValueAtTime(0.0, nextTime + seg);
-
-    try{
-      s.start(nextTime, pts.start);
-      // stop trochu po konci (pojistka)
-      s.stop(nextTime + seg + 0.05);
-    }catch{}
-
-    sources.push(s);
-
-    // další segment začne dřív (o fade), aby se překryl
-    nextTime = nextTime + (seg - fade);
-
-    // plánuj další spuštění přes timeout (neřešíme ultra přesnost – jde o ambience)
-    const ms = Math.max(0, (nextTime - ctx.currentTime - 0.10) * 1000);
-    setTimeout(scheduleOne, ms);
-  };
-
-  scheduleOne();
-
-  realLoopController = {
-    stop(){
-      stopped = true;
-      for (const s of sources){
-        try{ s.stop(); }catch{}
-        try{ s.disconnect(); }catch{}
-      }
-      sources = [];
-    }
-  };
-}
 
 
 let presetFilter1 = null;     // BiquadFilterNode
@@ -569,6 +438,74 @@ async function ensureAudio(){
     numberOfOutputs: 1,
     outputChannelCount: [2],
   });
+}// === Seamless loop helper ===
+// Some "real" MP3 files contain seconds of actual silence at the end (minute-length exports).
+// We don't change the sound, we only choose better loop points (trim leading/trailing silence).
+function computeLoopPoints(buffer){
+  try{
+    const sr = buffer.sampleRate;
+    const data = buffer.getChannelData(0); // use first channel
+    const win = Math.max(512, Math.min(4096, Math.floor(sr * 0.02))); // ~20 ms window
+    const threshold = 0.005; // amplitude threshold (~-46 dB). Silence in MP3 is usually near 0.
+    const minActiveWins = 5; // require ~100 ms of "not silent" to avoid false triggers
+
+    // helper: window max abs
+    const wmax = (start) => {
+      let maxv = 0;
+      const end = Math.min(data.length, start + win);
+      for (let i = start; i < end; i++){
+        const v = Math.abs(data[i]);
+        if (v > maxv) maxv = v;
+      }
+      return maxv;
+    };
+
+    // find leading non-silence
+    let lead = 0;
+    let activeCount = 0;
+    for (let p = 0; p < data.length; p += win){
+      if (wmax(p) > threshold){
+        activeCount++;
+        if (activeCount >= minActiveWins){
+          lead = Math.max(0, p - (minActiveWins * win));
+          break;
+        }
+      } else {
+        activeCount = 0;
+      }
+    }
+
+    // find trailing non-silence
+    let trail = data.length;
+    activeCount = 0;
+    for (let p = data.length - win; p >= 0; p -= win){
+      if (wmax(p) > threshold){
+        activeCount++;
+        if (activeCount >= minActiveWins){
+          trail = Math.min(data.length, p + ((minActiveWins + 1) * win));
+          break;
+        }
+      } else {
+        activeCount = 0;
+      }
+    }
+
+    // safety margin to avoid any MP3 encoder delay remnants
+    const margin = Math.floor(sr * 0.02); // 20 ms
+    let start = Math.max(0, lead + margin);
+    let end = Math.min(data.length, trail - margin);
+
+    // sanity
+    const minLen = Math.floor(sr * 1.0); // at least 1s loop
+    if (!isFinite(start) || !isFinite(end) || end - start < minLen){
+      return { start: 0, end: buffer.duration };
+    }
+
+    return { start: start / sr, end: end / sr };
+  }catch(e){
+    console.warn("computeLoopPoints failed", e);
+    return { start: 0, end: buffer.duration };
+  }
 }
 
 async function ensureRealWaterfallBuffer(){
@@ -585,6 +522,7 @@ async function ensureRealWaterfallBuffer(){
       .then((ab) => ctx.decodeAudioData(ab))
       .then((buf) => {
         realWaterfallBuffer = buf;
+        realWaterfallLoop = computeLoopPoints(buf);
         return buf;
       })
       .catch((err) => {
@@ -610,6 +548,7 @@ function ensureRealSeaBuffer(){
       .then((ab) => ctx.decodeAudioData(ab))
       .then((buf) => {
         realSeaBuffer = buf;
+        realSeaLoop = computeLoopPoints(buf);
         return buf;
       })
       .catch((err) => {
@@ -635,6 +574,7 @@ function ensureRealWindBuffer(){
       .then((ab) => ctx.decodeAudioData(ab))
       .then((buf) => {
         realWindBuffer = buf;
+        realWindLoop = computeLoopPoints(buf);
         return buf;
       })
       .catch((err) => {
@@ -660,6 +600,7 @@ function ensureRealRainBuffer(){
       .then((ab) => ctx.decodeAudioData(ab))
       .then((buf) => {
         realRainBuffer = buf;
+        realRainLoop = computeLoopPoints(buf);
         return buf;
       })
       .catch((err) => {
@@ -711,55 +652,118 @@ if (mode === "waterfall_real"){
     return;
   }
 
-  // Seamless smycka: odstrani i dlouhe ticho na konci (napr. 1 min MP3)
-  startRealSeamlessLoop(realWaterfallBuffer);
-  fileSource = null; // smycku ridi realLoopController
+  fileSource = ctx.createBufferSource();
+  fileSource.buffer = realWaterfallBuffer;
+  fileSource.loop = true;
+
+  // Auto-trim long silence in source file (seamless loop)
+  const lp = realWaterfallLoop || { start: 0, end: fileSource.buffer.duration };
+  fileSource.loopStart = lp.start;
+  fileSource.loopEnd = lp.end;
+
+  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
+  fileSource.connect(masterGain);
+
+  try{ fileSource.start(); }catch{}
   return;
 }
 
 // === Moře (real) - MP3 loop ===
 if (mode === "sea_real"){
-  // Buffer musi byt nacteny (zajišťuje start() / rebuildIfPlaying())
   if (!realSeaBuffer){
     setStatus("Nacitam more...");
     return;
   }
+  fileSource = ctx.createBufferSource();
+  fileSource.buffer = realSeaBuffer;
+  fileSource.loop = true;
 
-  // Seamless smycka: odstrani i dlouhe ticho na konci (napr. 1 min MP3)
-  startRealSeamlessLoop(realSeaBuffer);
-  fileSource = null; // smycku ridi realLoopController
+  // Auto-trim long silence in source file (seamless loop)
+  const lp = realSeaLoop || { start: 0, end: fileSource.buffer.duration };
+  fileSource.loopStart = lp.start;
+  fileSource.loopEnd = lp.end;
+
+  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
+  fileSource.connect(masterGain);
+
+  try{ fileSource.start(); }catch{}
   return;
 }
 
 // === Vítr (real) - MP3 loop ===
 if (mode === "wind_real"){
-  // Buffer musi byt nacteny (zajišťuje start() / rebuildIfPlaying())
   if (!realWindBuffer){
     setStatus("Nacitam vitr...");
     return;
   }
+  fileSource = ctx.createBufferSource();
+  fileSource.buffer = realWindBuffer;
+  fileSource.loop = true;
 
-  // Seamless smycka: odstrani i dlouhe ticho na konci (napr. 1 min MP3)
-  startRealSeamlessLoop(realWindBuffer);
-  fileSource = null; // smycku ridi realLoopController
+  // Auto-trim long silence in source file (seamless loop)
+  const lp = realWindLoop || { start: 0, end: fileSource.buffer.duration };
+  fileSource.loopStart = lp.start;
+  fileSource.loopEnd = lp.end;
+
+  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
+  fileSource.connect(masterGain);
+
+  try{ fileSource.start(); }catch{}
   return;
 }
 
 // === Vítr (real) - MP3 loop ===
 if (mode === "rain_real"){
-  // Buffer musi byt nacteny (zajišťuje start() / rebuildIfPlaying())
   if (!realRainBuffer){
     setStatus("Nacitam vitr...");
     return;
   }
+  fileSource = ctx.createBufferSource();
+  fileSource.buffer = realRainBuffer;
+  fileSource.loop = true;
 
-  // Seamless smycka: odstrani i dlouhe ticho na konci (napr. 1 min MP3)
-  startRealSeamlessLoop(realRainBuffer);
-  fileSource = null; // smycku ridi realLoopController
+  // Auto-trim long silence in source file (seamless loop)
+  const lp = realRainLoop || { start: 0, end: fileSource.buffer.duration };
+  fileSource.loopStart = lp.start;
+  fileSource.loopEnd = lp.end;
+
+  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
+  fileSource.connect(masterGain);
+
+  try{ fileSource.start(); }catch{}
   return;
 }
+   
+  // nastavit typ + „jemnost“ (level)
+  const baseLevel = 0.18 + 0.35 * shape;
+  noiseNode.parameters.get("type").setValueAtTime(mapModeToNoiseType(mode), ctx.currentTime);
+  noiseNode.parameters.get("level").setValueAtTime(baseLevel, ctx.currentTime);
 
-if (mode === "white" || mode === "pink" || mode === "brown"){
+  presetFilter1 = ctx.createBiquadFilter();
+  presetFilter2 = ctx.createBiquadFilter();
+  presetFilter1.type = "allpass";
+  presetFilter2.type = "allpass";
+
+  // LFO – velmi jemné „živé“ vlnění
+  lfo = ctx.createOscillator();
+  lfoGain = ctx.createGain();
+  lfo.type = "sine";
+  lfo.frequency.value = 0.15;
+  lfoGain.gain.value = 0.0;
+
+  // chain: noise -> f1 -> f2 -> masterGain
+  noiseNode.connect(presetFilter1);
+  presetFilter1.connect(presetFilter2);
+  presetFilter2.connect(masterGain);
+
+  // LFO -> masterGain.gain
+  try{
+    lfo.connect(lfoGain);
+    lfoGain.connect(masterGain.gain);
+  }catch{}
+
+  // Základní šumy (jemné vyhlazení)
+  if (mode === "white" || mode === "pink" || mode === "brown"){
     presetFilter1.type = "lowpass";
     presetFilter1.frequency.value = 8000 - 5500 * (1 - shape);
     presetFilter1.Q.value = 0.2;
