@@ -81,19 +81,34 @@
 
   <!-- Timer edit (modal) -->
   <div id="timerModal" class="modal" hidden>
-    <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="timerTitle">
-      <div class="modalHead">
-        <div id="timerTitle" class="modalTitle">Nastavit časovač</div>
-        <button id="timerClose" class="iconBtn" aria-label="Zavřít">✕</button>
+    <div class="modalCard timerCard" role="dialog" aria-modal="true" aria-labelledby="timerTitle">
+      <div class="timerHead">
+        <div id="timerTitle" class="modalTitle">Nastavit čas</div>
+        <div class="timerHeadBtns">
+          <button id="timerCancel" class="btn" type="button">Zrušit</button>
+          <button id="timerOk" class="btn primary" type="button">OK</button>
+        </div>
       </div>
 
-      <div class="helpText">
-        <p>Zadej čas ve formátu <b>HH:MM:SS</b> (např. 01:30:00). Na hlavním displeji lze čas měnit i tahem prstu nahoru/dolů.</p>
-      </div>
+      <div class="timerPicker" aria-label="Výběr času">
+        <div class="timerTop" aria-hidden="false">
+          <button id="timerTopH" class="timerTopNum" type="button" aria-label="Hodiny">00</button>
+          <span class="timerTopColon">:</span>
+          <button id="timerTopM" class="timerTopNum" type="button" aria-label="Minuty">00</button>
+          <span class="timerTopColon">:</span>
+          <button id="timerTopS" class="timerTopNum" type="button" aria-label="Sekundy">00</button>
+        </div>
 
-      <div class="timerEdit">
-        <input id="timerInput" class="timerInput" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="01:30:00" />
-        <button id="timerSave" class="btn primary" type="button">Uložit</button>
+        <div class="timerWheels" role="group" aria-label="Rolovací výběr času">
+          <div class="wheel" data-unit="h"><div id="wheelH" class="wheelList" tabindex="0" aria-label="Hodiny"></div></div>
+          <div class="wheelColon">:</div>
+          <div class="wheel" data-unit="m"><div id="wheelM" class="wheelList" tabindex="0" aria-label="Minuty"></div></div>
+          <div class="wheelColon">:</div>
+          <div class="wheel" data-unit="s"><div id="wheelS" class="wheelList" tabindex="0" aria-label="Sekundy"></div></div>
+          <div class="wheelHighlight" aria-hidden="true"></div>
+        </div>
+
+        <div class="timerHint">Tip: klepni na čas nahoře a můžeš ho přepsat klávesnicí (HH:MM:SS).</div>
       </div>
     </div>
   </div>
