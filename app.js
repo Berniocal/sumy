@@ -531,6 +531,8 @@ function applyVolume(){
 function buildChainFor(mode){
   if (!ctx || !noiseNode || !masterGain) return;
 
+  // Jemnost/intenzita se vztahuje pouze na syntetické šumy.
+  // „Real“ nahrávky se NESMÍ nijak upravovat (žádné filtry / EQ / změny barvy).
   const shape = intensity01();
 
   // vždy nejdřív čistě odpojit starý řetězec
@@ -544,25 +546,12 @@ if (mode === "waterfall_real"){
     return;
   }
 
-  // Filtry + jemnost podle intensity
-  presetFilter1 = ctx.createBiquadFilter();
-  presetFilter2 = ctx.createBiquadFilter();
-
-  presetFilter1.type = "lowpass";
-  presetFilter1.frequency.value = 7000 + 9000 * shape;
-  presetFilter1.Q.value = 0.3;
-
-  presetFilter2.type = "highpass";
-  presetFilter2.frequency.value = 40 + 180 * shape;
-  presetFilter2.Q.value = 0.2;
-
   fileSource = ctx.createBufferSource();
   fileSource.buffer = realWaterfallBuffer;
   fileSource.loop = true;
 
-  fileSource.connect(presetFilter1);
-  presetFilter1.connect(presetFilter2);
-  presetFilter2.connect(masterGain);
+  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
+  fileSource.connect(masterGain);
 
   try{ fileSource.start(); }catch{}
   return;
@@ -574,26 +563,12 @@ if (mode === "sea_real"){
     setStatus("Nacitam more...");
     return;
   }
-
-  presetFilter1 = ctx.createBiquadFilter();
-  presetFilter2 = ctx.createBiquadFilter();
-
-  // Moře: víc basů, méně sykavek
-  presetFilter1.type = "lowpass";
-  presetFilter1.frequency.value = 1200 + 2800 * shape; // 1.2–4.0 kHz
-  presetFilter1.Q.value = 0.35;
-
-  presetFilter2.type = "highpass";
-  presetFilter2.frequency.value = 15 + 50 * shape; // 15–65 Hz
-  presetFilter2.Q.value = 0.25;
-
   fileSource = ctx.createBufferSource();
   fileSource.buffer = realSeaBuffer;
   fileSource.loop = true;
 
-  fileSource.connect(presetFilter1);
-  presetFilter1.connect(presetFilter2);
-  presetFilter2.connect(masterGain);
+  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
+  fileSource.connect(masterGain);
 
   try{ fileSource.start(); }catch{}
   return;
@@ -605,26 +580,12 @@ if (mode === "wind_real"){
     setStatus("Nacitam vitr...");
     return;
   }
-
-  presetFilter1 = ctx.createBiquadFilter();
-  presetFilter2 = ctx.createBiquadFilter();
-
-  // Vítr: potlačit basy (rumble) a hodně kontrolovat výšky podle intensity
-  presetFilter1.type = "highpass";
-  presetFilter1.frequency.value = 60 + 220 * shape; // 60–280 Hz
-  presetFilter1.Q.value = 0.35;
-
-  presetFilter2.type = "lowpass";
-  presetFilter2.frequency.value = 1500 + 6000 * shape; // 1.5–7.5 kHz
-  presetFilter2.Q.value = 0.35;
-
   fileSource = ctx.createBufferSource();
   fileSource.buffer = realWindBuffer;
   fileSource.loop = true;
 
-  fileSource.connect(presetFilter1);
-  presetFilter1.connect(presetFilter2);
-  presetFilter2.connect(masterGain);
+  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
+  fileSource.connect(masterGain);
 
   try{ fileSource.start(); }catch{}
   return;
@@ -873,7 +834,11 @@ toggleBtn.addEventListener("click", async () => {
   }
 });
 
-intensity.addEventListener("input", () => rebuildIfPlaying());
+intensity.addEventListener("input", () => {
+  // U „real“ nahrávek nemá jemnost/intenzita žádný vliv.
+  if (String(currentSound).endsWith("_real")) return;
+  rebuildIfPlaying();
+});
 volume.addEventListener("input", () => { if (isPlaying) applyVolume(); });
 
 // Timer: edit + swipe
