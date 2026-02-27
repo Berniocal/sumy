@@ -3,7 +3,7 @@
    - Update: pro stejné origin soubory vracíme cache hned, ale na pozadí dotahujeme novou verzi a ukládáme do cache.
    - UI může vynutit okamžitou aktivaci přes message {type:'SKIP_WAITING'}.
 */
-const CACHE_NAME = "noise-pwa-v17";
+const CACHE_NAME = "noise-pwa-v18";
 const ASSETS = [
   "./",
   "./index.html",
@@ -11,7 +11,9 @@ const ASSETS = [
   "./app.js",
   "./noise-worklet.js",
   "./manifest.webmanifest",
-  "./waterfall-real.wav",
+  "./waterfall-real.mp3",
+  "./sea-real.mp3",
+  "./wind-real.mp3",
   "./icons/icon.svg",
   "./icons/maskable.svg"
 ];
