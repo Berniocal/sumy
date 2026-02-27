@@ -44,6 +44,15 @@
         </div>
       </div>
 
+      <div class="row">
+        <div class="field">
+          <label>Časovač</label>
+          <button id="timerDisplay" class="timerDisplay" type="button" aria-label="Nastavit časovač">01:30:00</button>
+        </div>
+
+        <button id="timerToggle" class="btn" type="button" aria-pressed="false">Zapnout</button>
+      </div>
+
       <div class="small" id="status">Připraveno.</div>
     </section>
   </main>
@@ -66,6 +75,25 @@
         <button class="chip" data-sound="wind">Vítr</button>
         <button class="chip" data-sound="fan">Ventilátor</button>
         <button class="chip" data-sound="vacuum">Vysavač</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timer edit (modal) -->
+  <div id="timerModal" class="modal" hidden>
+    <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="timerTitle">
+      <div class="modalHead">
+        <div id="timerTitle" class="modalTitle">Nastavit časovač</div>
+        <button id="timerClose" class="iconBtn" aria-label="Zavřít">✕</button>
+      </div>
+
+      <div class="helpText">
+        <p>Zadej čas ve formátu <b>HH:MM:SS</b> (např. 01:30:00). Na hlavním displeji lze čas měnit i tahem prstu nahoru/dolů.</p>
+      </div>
+
+      <div class="timerEdit">
+        <input id="timerInput" class="timerInput" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="01:30:00" />
+        <button id="timerSave" class="btn primary" type="button">Uložit</button>
       </div>
     </div>
   </div>
