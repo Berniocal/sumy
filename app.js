@@ -11,6 +11,19 @@ const intensity  = $("intensity");
 const volume     = $("volume");
 const statusEl   = $("status");
 
+// Timer
+const timerDisplay = $("timerDisplay");
+const timerToggle  = $("timerToggle");
+const timerModal   = $("timerModal");
+const timerCancel  = $("timerCancel");
+const timerOk      = $("timerOk");
+const timerTopH    = $("timerTopH");
+const timerTopM    = $("timerTopM");
+const timerTopS    = $("timerTopS");
+const wheelH       = $("wheelH");
+const wheelM       = $("wheelM");
+const wheelS       = $("wheelS");
+
 const soundModal = $("soundModal");
 const soundClose = $("soundClose");
 
@@ -31,7 +44,106 @@ let lfoGain = null;           // GainNode (mod depth)
 let currentSound = "white";
 let isPlaying = false;
 
+// Timer state
+let timerEnabled = false;
+let timerDurationSec = 90 * 60; // default 01:30:00
+let timerRemainingSec = timerDurationSec;
+let timerInterval = null;
+let timerIsRunning = false;
+let timerEndAtMs = 0;
+
+// Picker state (modal)
+let pickerH = 1;
+let pickerM = 30;
+let pickerS = 0;
+let wheelsBuilt = false;
+
 function setStatus(t){ statusEl.textContent = t; }
+
+function pad2(n){
+  const x = Math.max(0, Math.floor(Number(n) || 0));
+  return String(x).padStart(2, "0");
+}
+
+function secondsToHMS(totalSec){
+  const s = Math.max(0, Math.floor(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return { h, m, s: ss };
+}
+
+function hmsToSeconds(h, m, s){
+  const hh = Math.max(0, Math.min(99, Math.floor(Number(h) || 0)));
+  const mm = Math.max(0, Math.min(59, Math.floor(Number(m) || 0)));
+  const ss = Math.max(0, Math.min(59, Math.floor(Number(s) || 0)));
+  return hh * 3600 + mm * 60 + ss;
+}
+
+function formatHMS(totalSec){
+  const {h,m,s} = secondsToHMS(totalSec);
+  return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+}
+
+function parseHMS(text){
+  const t = String(text || "").trim();
+  const m = t.match(/^(\d{1,2})\s*:\s*(\d{1,2})\s*:\s*(\d{1,2})$/);
+  if (!m) return null;
+  const sec = hmsToSeconds(m[1], m[2], m[3]);
+  return sec;
+}
+
+function updateTimerUI(){
+  if (!timerDisplay) return;
+  timerDisplay.textContent = formatHMS(timerIsRunning ? timerRemainingSec : timerDurationSec);
+
+  if (timerToggle){
+    timerToggle.textContent = timerEnabled ? "Vypnout" : "Zapnout";
+    timerToggle.setAttribute("aria-pressed", timerEnabled ? "true" : "false");
+  }
+}
+
+function clearTimerInterval(){
+  if (timerInterval){
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  timerIsRunning = false;
+  timerEndAtMs = 0;
+}
+
+function stopTimerOnly(){
+  clearTimerInterval();
+  timerRemainingSec = timerDurationSec;
+  updateTimerUI();
+}
+
+function startCountdownFromDuration(){
+  if (!timerEnabled) return;
+  clearTimerInterval();
+  timerRemainingSec = timerDurationSec;
+  timerIsRunning = true;
+  timerEndAtMs = Date.now() + (timerDurationSec * 1000);
+  updateTimerUI();
+
+  // Použijeme "end time" (méně driftu a funguje líp po uspání/zhasnutí obrazovky)
+  timerInterval = setInterval(async () => {
+    const now = Date.now();
+    timerRemainingSec = Math.max(0, Math.ceil((timerEndAtMs - now) / 1000));
+    updateTimerUI();
+
+    if (timerRemainingSec <= 0){
+      clearTimerInterval();
+      // po doběhnutí timer vypneme a zastavíme zvuk
+      timerEnabled = false;
+      timerRemainingSec = timerDurationSec;
+      updateTimerUI();
+      if (isPlaying){
+        try{ await stopHard(); }catch{}
+      }
+    }
+  }, 250);
+}
 
 function labelFor(mode){
   switch(mode){
@@ -70,6 +182,173 @@ function closeSoundModal(){
     soundModal.removeEventListener("click", soundModal._onBackdrop);
     soundModal._onBackdrop = null;
   }
+}
+
+/* =========================
+   Timer modal
+   ========================= */
+
+function closeTimerModal(){
+  if (!timerModal) return;
+  timerModal.hidden = true;
+  timerModal.style.display = "none";
+  document.body.classList.remove("modalOpen");
+  if (timerModal._onBackdrop){
+    timerModal.removeEventListener("click", timerModal._onBackdrop);
+    timerModal._onBackdrop = null;
+  }
+}
+
+function openTimerModal(){
+  if (!timerModal) return;
+
+  // nastav výchozí hodnoty pickeru z uložené délky
+  const cur = secondsToHMS(timerDurationSec);
+  pickerH = Math.max(0, Math.min(99, cur.h));
+  pickerM = Math.max(0, Math.min(59, cur.m));
+  pickerS = Math.max(0, Math.min(59, cur.s));
+
+  if (!wheelsBuilt){
+    buildWheels();
+    wheelsBuilt = true;
+  }
+  syncPickerUI(true);
+
+  timerModal.hidden = false;
+  timerModal.style.display = "flex";
+  document.body.classList.add("modalOpen");
+
+  const onBackdrop = (e) => {
+    if (e.target === timerModal) closeTimerModal();
+  };
+  timerModal._onBackdrop = onBackdrop;
+  timerModal.addEventListener("click", onBackdrop);
+
+}
+
+function buildWheel(listEl, max){
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  for (let i = 0; i <= max; i++){
+    const div = document.createElement("div");
+    div.className = "wheelItem";
+    div.textContent = pad2(i);
+    div.dataset.value = String(i);
+    listEl.appendChild(div);
+  }
+}
+
+function getItemHeight(listEl){
+  const item = listEl?.querySelector(".wheelItem");
+  if (!item) return 56;
+  const r = item.getBoundingClientRect();
+  return Math.max(40, Math.round(r.height || 56));
+}
+
+function scrollToValue(listEl, value, behavior="instant"){
+  if (!listEl) return;
+  const h = getItemHeight(listEl);
+  const v = Math.max(0, Math.floor(Number(value) || 0));
+  const top = v * h;
+  try{
+    listEl.scrollTo({ top, behavior });
+  }catch{
+    listEl.scrollTop = top;
+  }
+}
+
+function valueFromScroll(listEl, max){
+  const h = getItemHeight(listEl);
+  const idx = Math.round((listEl?.scrollTop || 0) / h);
+  return Math.max(0, Math.min(max, idx));
+}
+
+function setActiveItem(listEl, value){
+  if (!listEl) return;
+  const items = listEl.querySelectorAll(".wheelItem");
+  items.forEach((it) => it.classList.toggle("isActive", Number(it.dataset.value) === value));
+}
+
+function syncTop(){
+  if (timerTopH) timerTopH.textContent = pad2(pickerH);
+  if (timerTopM) timerTopM.textContent = pad2(pickerM);
+  if (timerTopS) timerTopS.textContent = pad2(pickerS);
+}
+
+function syncPickerUI(jump=false){
+  syncTop();
+  scrollToValue(wheelH, pickerH, jump ? "instant" : "smooth");
+  scrollToValue(wheelM, pickerM, jump ? "instant" : "smooth");
+  scrollToValue(wheelS, pickerS, jump ? "instant" : "smooth");
+  setActiveItem(wheelH, pickerH);
+  setActiveItem(wheelM, pickerM);
+  setActiveItem(wheelS, pickerS);
+}
+
+function promptKeyboardEdit(){
+  const cur = `${pad2(pickerH)}:${pad2(pickerM)}:${pad2(pickerS)}`;
+  const val = window.prompt("Zadej čas (HH:MM:SS)", cur);
+  if (val === null) return;
+  const sec = parseHMS(val);
+  if (sec === null) return;
+  const hms = secondsToHMS(sec);
+  pickerH = Math.max(0, Math.min(99, hms.h));
+  pickerM = Math.max(0, Math.min(59, hms.m));
+  pickerS = Math.max(0, Math.min(59, hms.s));
+  syncPickerUI(true);
+}
+
+function attachWheelLogic(listEl, max, getVal, setVal){
+  if (!listEl) return;
+
+  let raf = 0;
+  const onScroll = () => {
+    if (raf) cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      const v = valueFromScroll(listEl, max);
+      if (v !== getVal()){
+        setVal(v);
+        syncTop();
+      }
+      setActiveItem(listEl, v);
+    });
+  };
+
+  listEl.addEventListener("scroll", onScroll, { passive: true });
+
+  // Tap on item
+  listEl.addEventListener("click", (e) => {
+    const it = e.target.closest(".wheelItem");
+    if (!it) return;
+    const v = Math.max(0, Math.min(max, Number(it.dataset.value)));
+    setVal(v);
+    syncPickerUI(false);
+  });
+
+  // Keyboard arrows
+  listEl.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const cur = getVal();
+    const next = Math.max(0, Math.min(max, cur + (e.key === "ArrowUp" ? -1 : 1)));
+    setVal(next);
+    syncPickerUI(false);
+  });
+}
+
+function buildWheels(){
+  buildWheel(wheelH, 99);
+  buildWheel(wheelM, 59);
+  buildWheel(wheelS, 59);
+
+  attachWheelLogic(wheelH, 99, () => pickerH, (v) => (pickerH = v));
+  attachWheelLogic(wheelM, 59, () => pickerM, (v) => (pickerM = v));
+  attachWheelLogic(wheelS, 59, () => pickerS, (v) => (pickerS = v));
+
+  // Top display click -> keyboard edit
+  timerTopH?.addEventListener("click", promptKeyboardEdit);
+  timerTopM?.addEventListener("click", promptKeyboardEdit);
+  timerTopS?.addEventListener("click", promptKeyboardEdit);
 }
 
 function openSoundModal(){
@@ -275,6 +554,7 @@ function buildChainFor(mode){
 
 async function start(){
   closeSoundModal();
+  closeTimerModal();
 
   await ensureAudio();
   if (ctx.state === "suspended") await ctx.resume();
@@ -286,10 +566,17 @@ async function start(){
   isPlaying = true;
   toggleBtn.textContent = "■ Stop";
   setStatus(labelFor(currentSound));
+
+  if (timerEnabled){
+    startCountdownFromDuration();
+  }
 }
 
 async function stopHard(){
   if (!ctx) return;
+
+  // stop timer (audio stop)
+  stopTimerOnly();
 
   // absolutní ticho
   hardMuteNow();
@@ -309,6 +596,27 @@ function rebuildIfPlaying(){
   hardMuteNow();
   buildChainFor(currentSound);
   applyVolume();
+}
+
+function saveTimerSettings(){
+  try{
+    localStorage.setItem("sumyTimerEnabled", timerEnabled ? "1" : "0");
+    localStorage.setItem("sumyTimerDurationSec", String(timerDurationSec));
+  }catch{}
+}
+
+function loadTimerSettings(){
+  try{
+    const en = localStorage.getItem("sumyTimerEnabled");
+    const dur = localStorage.getItem("sumyTimerDurationSec");
+
+    timerEnabled = en === "1";
+    const d = Number(dur);
+    if (Number.isFinite(d) && d >= 0 && d <= 99*3600 + 59*60 + 59){
+      timerDurationSec = Math.floor(d);
+    }
+    timerRemainingSec = timerDurationSec;
+  }catch{}
 }
 
 /* =========================
@@ -350,11 +658,160 @@ toggleBtn.addEventListener("click", async () => {
 intensity.addEventListener("input", () => rebuildIfPlaying());
 volume.addEventListener("input", () => { if (isPlaying) applyVolume(); });
 
+// Timer: edit + swipe
+// Pozn.: Na některých mobilech (a někdy i na desktopu) se "click" na prvku s pointer událostmi
+// nemusí spolehlivě odpálit. Proto otevíráme editor na pointerup, pokud neproběhl swipe.
+if (timerDisplay){
+  // klávesnice (přístupnost)
+  timerDisplay.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " "){
+      e.preventDefault();
+      openTimerModal();
+    }
+  });
+
+  // Swipe up/down to change HH / MM / SS (Samsung-like)
+  const state = {
+    active: false,
+    startY: 0,
+    startX: 0,
+    seg: 1,
+    lastStep: 0,
+    moved: false,
+  };
+
+  const segmentFromX = (clientX) => {
+    const r = timerDisplay.getBoundingClientRect();
+    const x = Math.max(0, Math.min(r.width, clientX - r.left));
+    const idx = Math.floor((x / r.width) * 3);
+    return Math.max(0, Math.min(2, idx));
+  };
+
+  const applyDelta = (seg, delta) => {
+    const {h,m,s} = secondsToHMS(timerIsRunning ? timerRemainingSec : timerDurationSec);
+    let hh = h, mm = m, ss = s;
+    if (seg === 0) hh = Math.max(0, Math.min(99, hh + delta));
+    if (seg === 1) mm = Math.max(0, Math.min(59, mm + delta));
+    if (seg === 2) ss = Math.max(0, Math.min(59, ss + delta));
+
+    const newSec = hmsToSeconds(hh, mm, ss);
+    timerDurationSec = newSec;
+    timerRemainingSec = timerIsRunning ? newSec : newSec;
+
+    // když timer běží, přepneme ho na „nový“ čas (zjednodušení)
+    if (timerIsRunning){
+      clearTimerInterval();
+      if (timerEnabled && isPlaying) startCountdownFromDuration();
+    }
+
+    saveTimerSettings();
+    updateTimerUI();
+  };
+
+  timerDisplay.addEventListener("pointerdown", (e) => {
+    timerDisplay.setPointerCapture?.(e.pointerId);
+    state.active = true;
+    state.startY = e.clientY;
+    state.startX = e.clientX;
+    state.seg = segmentFromX(e.clientX);
+    state.lastStep = 0;
+    timerDisplay._swiped = false;
+    state.moved = false;
+  });
+
+  timerDisplay.addEventListener("pointermove", (e) => {
+    if (!state.active) return;
+    const dy = e.clientY - state.startY;
+    const dx = e.clientX - state.startX;
+
+    // ignorujeme náhodné mikropohyby
+    if (Math.abs(dy) < 8 && Math.abs(dx) < 8) return;
+
+    // když už je to tah, nespouštíme click
+    timerDisplay._swiped = true;
+    state.moved = true;
+
+    const stepPx = 28;
+    const steps = Math.trunc((-dy) / stepPx);
+    const delta = steps - state.lastStep;
+    if (delta !== 0){
+      applyDelta(state.seg, delta);
+      state.lastStep = steps;
+    }
+  });
+
+  const endSwipe = () => {
+    state.active = false;
+  };
+
+  timerDisplay.addEventListener("pointerup", () => {
+    // pokud to nebyl swipe/tah, otevři editor
+    if (!timerDisplay._swiped && !state.moved){
+      openTimerModal();
+    }
+    timerDisplay._swiped = false;
+    endSwipe();
+  });
+
+  timerDisplay.addEventListener("pointercancel", () => {
+    timerDisplay._swiped = false;
+    endSwipe();
+  });
+}
+
+// Timer: enable/disable
+if (timerToggle){
+  timerToggle.addEventListener("click", () => {
+    timerEnabled = !timerEnabled;
+    saveTimerSettings();
+    updateTimerUI();
+
+    if (!timerEnabled){
+      stopTimerOnly();
+      return;
+    }
+
+    // zapnuto: odpočítávání startne hned (až doběhne, případně vypne šum)
+    startCountdownFromDuration();
+  });
+}
+
+// Timer modal actions
+if (timerCancel) timerCancel.addEventListener("click", () => closeTimerModal());
+if (timerOk){
+  timerOk.addEventListener("click", () => {
+    const sec = hmsToSeconds(pickerH, pickerM, pickerS);
+    timerDurationSec = sec;
+    timerRemainingSec = sec;
+    saveTimerSettings();
+    updateTimerUI();
+    closeTimerModal();
+
+    if (timerEnabled){
+      startCountdownFromDuration();
+    }
+  });
+}
+
+if (timerModal){
+  timerModal.addEventListener("keydown", (e) => {
+    if (e.key === "Escape"){
+      e.preventDefault();
+      closeTimerModal();
+    }
+    if (e.key === "Enter"){
+      e.preventDefault();
+      timerOk?.click();
+    }
+  });
+}
+
 document.addEventListener("visibilitychange", () => {
   if (document.hidden){
     // Nezastavujeme audio – ať může hrát na pozadí / při zhasnuté obrazovce.
     // Jen zavřeme případné otevřené okno.
     closeSoundModal();
+    closeTimerModal();
   }
 });
 
@@ -378,7 +835,10 @@ if (installBtn){
 }
 
 /* init */
+loadTimerSettings();
 soundBtn.childNodes[0].textContent = labelFor(currentSound) + " ";
 toggleBtn.textContent = "▶ Play";
 setStatus("Připraveno.");
 closeSoundModal();
+closeTimerModal();
+updateTimerUI();
