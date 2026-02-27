@@ -36,6 +36,12 @@ let ctx = null;
 let masterGain = null;        // GainNode (volume)
 let noiseNode = null;         // AudioWorkletNode
 
+// Real audio loop (waterfalls)
+let realWaterfallBuffer = null;
+let realWaterfallBufferPromise = null;
+let fileSource = null;
+
+
 let presetFilter1 = null;     // BiquadFilterNode
 let presetFilter2 = null;     // BiquadFilterNode
 let lfo = null;               // OscillatorNode
@@ -151,6 +157,7 @@ function labelFor(mode){
     case "pink": return "Růžový šum";
     case "brown": return "Hnědý šum";
     case "waterfall": return "Vodopád";
+    case "waterfall_real": return "Vodopády (real)";
     case "rain": return "Déšť";
     case "wind": return "Vítr";
     case "fan": return "Ventilátor";
@@ -378,6 +385,11 @@ function hardMuteNow(){
 }
 
 function disconnectChain(){
+  // zastav přehrávání WAV smyčky (pokud běží)
+  try{ fileSource?.stop(); }catch{}
+  try{ fileSource?.disconnect(); }catch{}
+  fileSource = null;
+
   // odpoj šum a presety, zastav LFO
   try{ noiseNode?.disconnect(); }catch{}
   try{ presetFilter1?.disconnect(); }catch{}
@@ -410,6 +422,32 @@ async function ensureAudio(){
   });
 }
 
+async function ensureRealWaterfallBuffer(){
+  if (realWaterfallBuffer) return realWaterfallBuffer;
+  if (!ctx) await ensureAudio();
+  if (realWaterfallBuffer) return realWaterfallBuffer;
+
+  if (!realWaterfallBufferPromise){
+    realWaterfallBufferPromise = fetch("waterfall-real.wav")
+      .then((r) => {
+        if (!r.ok) throw new Error("Nelze načíst waterfall-real.wav");
+        return r.arrayBuffer();
+      })
+      .then((ab) => ctx.decodeAudioData(ab))
+      .then((buf) => {
+        realWaterfallBuffer = buf;
+        return buf;
+      })
+      .catch((err) => {
+        console.error(err);
+        realWaterfallBufferPromise = null;
+        return null;
+      });
+  }
+
+  return realWaterfallBufferPromise;
+}
+
 function mapModeToNoiseType(mode){
   // worklet: 0=white, 1=pink, 2=brown
   if (mode === "pink") return 1;
@@ -438,6 +476,38 @@ function buildChainFor(mode){
 
   // vždy nejdřív čistě odpojit starý řetězec
   disconnectChain();
+
+// === Vodopady (real) - WAV loop ===
+if (mode === "waterfall_real"){
+  // Buffer musi byt nacteny (zajišťuje start() / rebuildIfPlaying())
+  if (!realWaterfallBuffer){
+    setStatus("Nacitam vodopady...");
+    return;
+  }
+
+  // Filtry + jemnost podle intensity
+  presetFilter1 = ctx.createBiquadFilter();
+  presetFilter2 = ctx.createBiquadFilter();
+
+  presetFilter1.type = "lowpass";
+  presetFilter1.frequency.value = 7000 + 9000 * shape;
+  presetFilter1.Q.value = 0.3;
+
+  presetFilter2.type = "highpass";
+  presetFilter2.frequency.value = 40 + 180 * shape;
+  presetFilter2.Q.value = 0.2;
+
+  fileSource = ctx.createBufferSource();
+  fileSource.buffer = realWaterfallBuffer;
+  fileSource.loop = true;
+
+  fileSource.connect(presetFilter1);
+  presetFilter1.connect(presetFilter2);
+  presetFilter2.connect(masterGain);
+
+  try{ fileSource.start(); }catch{}
+  return;
+}
 
   // nastavit typ + „jemnost“ (level)
   const baseLevel = 0.18 + 0.35 * shape;
@@ -560,6 +630,14 @@ async function start(){
   if (ctx.state === "suspended") await ctx.resume();
 
   // postavit řetězec + hlasitost
+  // pro real vodopady si nejdriv nacti WAV buffer
+  if (currentSound === "waterfall_real"){
+    const buf = await ensureRealWaterfallBuffer();
+    if (!buf){
+      // fallback na synteticky vodopad
+      currentSound = "waterfall";
+    }
+  }
   buildChainFor(currentSound);
   applyVolume();
 
@@ -589,11 +667,19 @@ async function stopHard(){
   setStatus("Stop.");
 }
 
-function rebuildIfPlaying(){
+async function rebuildIfPlaying(){
   if (!isPlaying || !ctx) return;
 
   // přestavět preset (po změně zvuku/intenzity) bez „zbytků“
   hardMuteNow();
+// pro real vodopady si nejdriv nacti WAV buffer
+if (currentSound === "waterfall_real"){
+  const buf = await ensureRealWaterfallBuffer();
+  if (!buf){
+    currentSound = "waterfall";
+  }
+}
+
   buildChainFor(currentSound);
   applyVolume();
 }
