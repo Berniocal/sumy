@@ -43,6 +43,9 @@ let realWaterfallBufferPromise = null;
 let realSeaBuffer = null;
 let realSeaBufferPromise = null;
 
+let realRainBuffer = null;
+let realRainBufferPromise = null;
+
 let realWindBuffer = null;
 let realWindBufferPromise = null;
 let fileSource = null;
@@ -166,6 +169,7 @@ function labelFor(mode){
     case "waterfall_real": return "Vodopády (real)";
     case "sea_real": return "Moře (real)";
     case "wind_real": return "Vítr (real)";
+    case "rain_real": return "Déšť (real)";
     case "rain": return "Déšť";
     case "wind": return "Vítr";
     case "fan": return "Ventilátor";
@@ -506,6 +510,30 @@ function ensureRealWindBuffer(){
   return realWindBufferPromise;
 }
 
+function ensureRealRainBuffer(){
+  if (realRainBuffer) return realRainBuffer;
+  if (realRainBuffer) return realRainBuffer;
+
+  if (!realRainBufferPromise){
+    realRainBufferPromise = fetch("rain-real.mp3")
+      .then((r) => {
+        if (!r.ok) throw new Error("Nelze načíst rain-real.mp3");
+        return r.arrayBuffer();
+      })
+      .then((ab) => ctx.decodeAudioData(ab))
+      .then((buf) => {
+        realRainBuffer = buf;
+        return buf;
+      })
+      .catch((err) => {
+        console.error(err);
+        realRainBufferPromise = null;
+        return null;
+      });
+  }
+
+  return realRainBufferPromise;
+}
 
 function mapModeToNoiseType(mode){
   // worklet: 0=white, 1=pink, 2=brown
@@ -591,6 +619,23 @@ if (mode === "wind_real"){
   return;
 }
 
+// === Vítr (real) - MP3 loop ===
+if (mode === "rain_real"){
+  if (!realRainBuffer){
+    setStatus("Nacitam vitr...");
+    return;
+  }
+  fileSource = ctx.createBufferSource();
+  fileSource.buffer = realRainBuffer;
+  fileSource.loop = true;
+
+  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
+  fileSource.connect(masterGain);
+
+  try{ fileSource.start(); }catch{}
+  return;
+}
+   
   // nastavit typ + „jemnost“ (level)
   const baseLevel = 0.18 + 0.35 * shape;
   noiseNode.parameters.get("type").setValueAtTime(mapModeToNoiseType(mode), ctx.currentTime);
@@ -725,6 +770,10 @@ async function start(){
     const buf = await ensureRealWindBuffer();
     if (!buf) currentSound = "wind";
   }
+     if (currentSound === "rain_real"){
+    const buf = await ensureRealRainBuffer();
+    if (!buf) currentSound = "rain";
+  }
   buildChainFor(currentSound);
   applyVolume();
 
@@ -772,7 +821,10 @@ if (currentSound === "wind_real"){
   const buf = await ensureRealWindBuffer();
   if (!buf) currentSound = "wind";
 }
-
+if (currentSound === "rain_real"){
+  const buf = await ensureRealRainBuffer();
+  if (!buf) currentSound = "rain";
+}
   buildChainFor(currentSound);
   applyVolume();
 }
