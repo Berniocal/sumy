@@ -428,7 +428,9 @@ function disconnectChain(){
 async function ensureAudio(){
   if (ctx && masterGain && noiseNode) return;
 
-  ctx = new (window.AudioContext || window.webkitAudioContext)();
+ctx = new (window.AudioContext || window.webkitAudioContext)({
+  latencyHint: "playback"
+});
 
   masterGain = ctx.createGain();
   masterGain.gain.value = 0.0;
@@ -865,6 +867,8 @@ if (ctx.state === "suspended") await ctx.resume();
 if (!iosAudio.srcObject) {
   iosAudio.srcObject = iosDest.stream;
 }
+
+await iosAudio.play();
 
 iosAudio.play();
   // postavit řetězec + hlasitost
