@@ -432,6 +432,12 @@ async function ensureAudio(){
   masterGain.gain.value = 0.0;
   masterGain.connect(ctx.destination);
 
+   // iOS background audio workaround
+const iosAudio = document.getElementById("iosAudio");
+const iosDest = ctx.createMediaStreamDestination();
+masterGain.connect(iosDest);
+iosAudio.srcObject = iosDest.stream;
+
   await ctx.audioWorklet.addModule("noise-worklet.js");
   noiseNode = new AudioWorkletNode(ctx, "noise-processor", {
     numberOfInputs: 0,
