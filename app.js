@@ -640,7 +640,10 @@ function mapModeToNoiseType(mode){
 function applyVolume(){
   if (!ctx || !masterGain) return;
   const g = volToGain(Number(volume.value));
-  masterGain.gain.setValueAtTime(g, ctx.currentTime);
+ const t = ctx.currentTime;
+masterGain.gain.cancelScheduledValues(t);
+masterGain.gain.setValueAtTime(0, t);
+masterGain.gain.linearRampToValueAtTime(g, t + 0.05);
 }
 
 function buildChainFor(mode){
@@ -868,9 +871,11 @@ if (!iosAudio.srcObject) {
   iosAudio.srcObject = iosDest.stream;
 }
 
-await iosAudio.play();
-
-iosAudio.play();
+try {
+  await iosAudio.play();
+} catch (e) {
+  console.warn("iosAudio play blocked", e);
+}
   // postavit řetězec + hlasitost
   // pro real nahrávky si nejdřív načti MP3 buffer
   if (currentSound === "waterfall_real"){
