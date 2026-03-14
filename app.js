@@ -35,6 +35,8 @@ let deferredPrompt = null;
 let ctx = null;
 let masterGain = null;        // GainNode (volume)
 let noiseNode = null;         // AudioWorkletNode
+let iosAudio = null;
+let iosDest = null;
 
 // Real audio loop (waterfalls)
 let realWaterfallBuffer = null;
@@ -433,10 +435,9 @@ async function ensureAudio(){
   masterGain.connect(ctx.destination);
 
    // iOS background audio workaround
-const iosAudio = document.getElementById("iosAudio");
-const iosDest = ctx.createMediaStreamDestination();
+iosAudio = document.getElementById("iosAudio");
+iosDest = ctx.createMediaStreamDestination();
 masterGain.connect(iosDest);
-iosAudio.srcObject = iosDest.stream;
 
   await ctx.audioWorklet.addModule("noise-worklet.js");
   noiseNode = new AudioWorkletNode(ctx, "noise-processor", {
@@ -854,12 +855,18 @@ if (mode === "rain_real"){
 }
 
 async function start(){
+
   closeSoundModal();
   closeTimerModal();
 
-  await ensureAudio();
-  if (ctx.state === "suspended") await ctx.resume();
+await ensureAudio();
+if (ctx.state === "suspended") await ctx.resume();
 
+if (!iosAudio.srcObject) {
+  iosAudio.srcObject = iosDest.stream;
+}
+
+iosAudio.play();
   // postavit řetězec + hlasitost
   // pro real nahrávky si nejdřív načti MP3 buffer
   if (currentSound === "waterfall_real"){
@@ -892,6 +899,9 @@ async function start(){
 
 async function stopHard(){
   if (!ctx) return;
+
+  iosAudio.pause();
+  iosAudio.srcObject = null;
 
   // stop timer (audio stop)
   stopTimerOnly();
