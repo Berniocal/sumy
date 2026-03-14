@@ -7,23 +7,14 @@ class NoiseProcessor extends AudioWorkletProcessor {
     ];
   }
 
- constructor() {
-  super();
+  constructor() {
+    super();
+    // Pink noise (Paul Kellet) state
+    this.p0 = this.p1 = this.p2 = this.p3 = this.p4 = this.p5 = this.p6 = 0;
+    // Brown noise integrator
+    this.brown = 0;
+  }
 
-  // Pink noise (Paul Kellet) state
-  this.p0 = this.p1 = this.p2 = this.p3 = this.p4 = this.p5 = this.p6 = 0;
-
-  // Brown noise integrator
-  this.brown = 0;
-
-  // fast random generator seed
-  this.rand = 1;
-}}
-
-fastRand(){
-  this.rand = (this.rand * 16807) % 2147483647;
-  return (this.rand / 2147483647) * 2 - 1;
-}
   process(inputs, outputs, parameters) {
     const output = outputs[0];
     const ch0 = output[0];
@@ -37,7 +28,7 @@ fastRand(){
       const level = levelArr.length > 1 ? levelArr[i] : levelArr[0];
 
       // white base
-    let white = this.fastRand();
+      let white = (Math.random() * 2 - 1);
 
       let sample = white;
 

@@ -35,8 +35,6 @@ let deferredPrompt = null;
 let ctx = null;
 let masterGain = null;        // GainNode (volume)
 let noiseNode = null;         // AudioWorkletNode
-let iosAudio = null;
-let iosDest = null;
 
 // Real audio loop (waterfalls)
 let realWaterfallBuffer = null;
@@ -428,18 +426,11 @@ function disconnectChain(){
 async function ensureAudio(){
   if (ctx && masterGain && noiseNode) return;
 
-ctx = new (window.AudioContext || window.webkitAudioContext)({
-  latencyHint: "playback"
-});
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
 
   masterGain = ctx.createGain();
   masterGain.gain.value = 0.0;
   masterGain.connect(ctx.destination);
-
-   // iOS background audio workaround
-iosAudio = document.getElementById("iosAudio");
-iosDest = ctx.createMediaStreamDestination();
-masterGain.connect(iosDest);
 
   await ctx.audioWorklet.addModule("noise-worklet.js");
   noiseNode = new AudioWorkletNode(ctx, "noise-processor", {
@@ -640,10 +631,7 @@ function mapModeToNoiseType(mode){
 function applyVolume(){
   if (!ctx || !masterGain) return;
   const g = volToGain(Number(volume.value));
- const t = ctx.currentTime;
-masterGain.gain.cancelScheduledValues(t);
-masterGain.gain.setValueAtTime(0, t);
-masterGain.gain.linearRampToValueAtTime(g, t + 0.05);
+  masterGain.gain.setValueAtTime(g, ctx.currentTime);
 }
 
 function buildChainFor(mode){
@@ -860,22 +848,12 @@ if (mode === "rain_real"){
 }
 
 async function start(){
-
   closeSoundModal();
   closeTimerModal();
 
-await ensureAudio();
-if (ctx.state === "suspended") await ctx.resume();
+  await ensureAudio();
+  if (ctx.state === "suspended") await ctx.resume();
 
-if (!iosAudio.srcObject) {
-  iosAudio.srcObject = iosDest.stream;
-}
-
-try {
-  await iosAudio.play();
-} catch (e) {
-  console.warn("iosAudio play blocked", e);
-}
   // postavit řetězec + hlasitost
   // pro real nahrávky si nejdřív načti MP3 buffer
   if (currentSound === "waterfall_real"){
@@ -908,9 +886,6 @@ try {
 
 async function stopHard(){
   if (!ctx) return;
-
-  iosAudio.pause();
-  iosAudio.srcObject = null;
 
   // stop timer (audio stop)
   stopTimerOnly();
