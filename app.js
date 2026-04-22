@@ -652,19 +652,7 @@ if (mode === "waterfall_real"){
     return;
   }
 
-  fileSource = ctx.createBufferSource();
-  fileSource.buffer = realWaterfallBuffer;
-  fileSource.loop = true;
-
-  // Auto-trim long silence in source file (seamless loop)
-  const lp = realWaterfallLoop || { start: 0, end: fileSource.buffer.duration };
-  fileSource.loopStart = lp.start;
-  fileSource.loopEnd = lp.end;
-
-  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
-  fileSource.connect(masterGain);
-
-  try{ fileSource.start(); }catch{}
+  playSeamlessLoop(buffer); }catch{}
   return;
 }
 
@@ -674,19 +662,7 @@ if (mode === "sea_real"){
     setStatus("Nacitam more...");
     return;
   }
-  fileSource = ctx.createBufferSource();
-  fileSource.buffer = realSeaBuffer;
-  fileSource.loop = true;
-
-  // Auto-trim long silence in source file (seamless loop)
-  const lp = realSeaLoop || { start: 0, end: fileSource.buffer.duration };
-  fileSource.loopStart = lp.start;
-  fileSource.loopEnd = lp.end;
-
-  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
-  fileSource.connect(masterGain);
-
-  try{ fileSource.start(); }catch{}
+  playSeamlessLoop(buffer); }catch{}
   return;
 }
 
@@ -696,19 +672,7 @@ if (mode === "wind_real"){
     setStatus("Nacitam vitr...");
     return;
   }
-  fileSource = ctx.createBufferSource();
-  fileSource.buffer = realWindBuffer;
-  fileSource.loop = true;
-
-  // Auto-trim long silence in source file (seamless loop)
-  const lp = realWindLoop || { start: 0, end: fileSource.buffer.duration };
-  fileSource.loopStart = lp.start;
-  fileSource.loopEnd = lp.end;
-
-  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
-  fileSource.connect(masterGain);
-
-  try{ fileSource.start(); }catch{}
+  playSeamlessLoop(buffer); }catch{}
   return;
 }
 
@@ -718,19 +682,7 @@ if (mode === "rain_real"){
     setStatus("Nacitam vitr...");
     return;
   }
-  fileSource = ctx.createBufferSource();
-  fileSource.buffer = realRainBuffer;
-  fileSource.loop = true;
-
-  // Auto-trim long silence in source file (seamless loop)
-  const lp = realRainLoop || { start: 0, end: fileSource.buffer.duration };
-  fileSource.loopStart = lp.start;
-  fileSource.loopEnd = lp.end;
-
-  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
-  fileSource.connect(masterGain);
-
-  try{ fileSource.start(); }catch{}
+  playSeamlessLoop(buffer); }catch{}
   return;
 }
    
@@ -1223,4 +1175,46 @@ if ("serviceWorker" in navigator) {
       console.warn("SW register failed", e);
     }
   });
+}
+
+
+// === Seamless loop helper ===
+function playSeamlessLoop(buffer) {
+  if (!ctx || !masterGain) return;
+
+  const fadeTime = 0.2; // 200 ms crossfade
+  const duration = buffer.duration;
+
+  function createSource(startTime) {
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, startTime);
+
+    src.connect(gain).connect(masterGain);
+
+    // fade in
+    gain.gain.linearRampToValueAtTime(1, startTime + fadeTime);
+    // fade out
+    gain.gain.setValueAtTime(1, startTime + duration - fadeTime);
+    gain.gain.linearRampToValueAtTime(0, startTime + duration);
+
+    src.start(startTime);
+    src.stop(startTime + duration);
+
+    return src;
+  }
+
+  let t = ctx.currentTime;
+
+  function schedule() {
+    if (!isPlaying) return;
+    createSource(t);
+    createSource(t + duration - fadeTime);
+    t += duration - fadeTime;
+    setTimeout(schedule, (duration - fadeTime) * 1000);
+  }
+
+  schedule();
 }
