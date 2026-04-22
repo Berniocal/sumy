@@ -644,45 +644,43 @@ function buildChainFor(mode){
   // vždy nejdřív čistě odpojit starý řetězec
   disconnectChain();
 
-// === Vodopady (real) - MP3 loop ===
+// === Vodopády (real) ===
 if (mode === "waterfall_real"){
-  // Buffer musi byt nacteny (zajišťuje start() / rebuildIfPlaying())
   if (!realWaterfallBuffer){
     setStatus("Nacitam vodopady...");
     return;
   }
-
-  playSeamlessLoop(buffer); }catch{}
+  playSeamlessLoop(realWaterfallBuffer);
   return;
 }
 
-// === Moře (real) - MP3 loop ===
+// === Moře (real) ===
 if (mode === "sea_real"){
   if (!realSeaBuffer){
     setStatus("Nacitam more...");
     return;
   }
-  playSeamlessLoop(buffer); }catch{}
+  playSeamlessLoop(realSeaBuffer);
   return;
 }
 
-// === Vítr (real) - MP3 loop ===
+// === Vítr (real) ===
 if (mode === "wind_real"){
   if (!realWindBuffer){
     setStatus("Nacitam vitr...");
     return;
   }
-  playSeamlessLoop(buffer); }catch{}
+  playSeamlessLoop(realWindBuffer);
   return;
 }
 
-// === Vítr (real) - MP3 loop ===
+// === Déšť (real) ===
 if (mode === "rain_real"){
   if (!realRainBuffer){
-    setStatus("Nacitam vitr...");
+    setStatus("Nacitam dest...");
     return;
   }
-  playSeamlessLoop(buffer); }catch{}
+  playSeamlessLoop(realRainBuffer);
   return;
 }
    
