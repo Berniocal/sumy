@@ -117,5 +117,72 @@
   </div>
 
    <script src="app.js"></script>
+
+<div id="migrationModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;align-items:center;justify-content:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+  <div style="max-width:520px;width:90%;background:#111827;color:white;border-radius:20px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.5);text-align:center;">
+    <h2 style="margin-top:0;font-size:1.8rem;">Nová verze aplikace je připravena 🚀</h2>
+    <p style="line-height:1.6;font-size:1.05rem;">
+      Tato původní verze bude postupně ukončena.<br>
+      Přesuňte se na novou, rychlejší a aktuální verzi:
+    </p>
+    <p style="font-size:1.2rem;font-weight:700;color:#60a5fa;">
+      https://bernio.cz/sumy/
+    </p>
+
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:22px;">
+      <button id="goNewApp" style="padding:14px;border:none;border-radius:14px;font-size:1rem;font-weight:700;background:#22c55e;color:white;cursor:pointer;">
+        Otevřít novou verzi
+      </button>
+
+      <button id="laterApp" style="padding:12px;border:none;border-radius:14px;font-size:0.95rem;background:#374151;color:white;cursor:pointer;">
+        Připomenout později
+      </button>
+
+      <button id="closeOldApp" style="padding:12px;border:none;border-radius:14px;font-size:0.95rem;background:#7f1d1d;color:white;cursor:pointer;">
+        Zůstat ve staré verzi
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // ZOBRAZIT POUZE NA STARÉ DOMÉNĚ
+  const isOldDomain =
+    location.hostname.includes("berniocal.github.io");
+
+  // Pokud už je nová doména, nic nedělej
+  if (!isOldDomain) return;
+
+  const KEY = "bernio_migration_hide_until";
+  const MIGRATED_KEY = "bernio_migrated_to_new_app";
+
+  // Pokud už uživatel přešel, znovu neukazovat
+  if (localStorage.getItem(MIGRATED_KEY) === "1") return;
+
+  const hideUntil = Number(localStorage.getItem(KEY) || 0);
+
+  if(Date.now() > hideUntil){
+    const modal = document.getElementById("migrationModal");
+    if (!modal) return;
+
+    modal.style.display = "flex";
+
+    document.getElementById("goNewApp").onclick = () => {
+      localStorage.setItem(MIGRATED_KEY, "1");
+      window.location.href = "https://bernio.cz/sumy/";
+    };
+
+    document.getElementById("laterApp").onclick = () => {
+      localStorage.setItem(KEY, Date.now() + 3*24*60*60*1000); // 3 dny
+      modal.style.display = "none";
+    };
+
+    document.getElementById("closeOldApp").onclick = () => {
+      modal.style.display = "none";
+    };
+  }
+})();
+</script>
 </body>
 </html>
