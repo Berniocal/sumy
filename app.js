@@ -1,14 +1,15 @@
-/* app.js – pouze výběr zvuku + Play/Stop + intenzita + hlasitost
-   Audio je zpět jako v 1. verzi: AudioWorklet (noise-worklet.js), bez smyčkování bufferu.
-   + chování jako ve verzi, která hrála i při zhasnuté/zavřené obrazovce: na visibilitychange audio nezastavujeme.
+/* app.js – výběr zvuku + Play/Stop + časovač + světlý/tmavý režim
+   Mobilní úprava:
+   - odstraněné posuvníky hlasitosti a intenzity
+   - real zvuky se nesmyčkují tvrdým loop=true, ale překrývají se dvě vrstvy
+     s postupným fade-out/fade-in, aby nebyl slyšet přechod začátek/konec.
 */
 
 const $ = (id) => document.getElementById(id);
 
 const soundBtn   = $("soundBtn");
 const toggleBtn  = $("toggleBtn");
-const intensity  = $("intensity");
-const volume     = $("volume");
+const themeBtn   = $("themeBtn");
 const statusEl   = $("status");
 
 // Timer
@@ -48,7 +49,7 @@ let realRainBufferPromise = null;
 
 let realWindBuffer = null;
 let realWindBufferPromise = null;
-let fileSource = null;
+let realLoop = null;
 
 
 let presetFilter1 = null;     // BiquadFilterNode
@@ -178,13 +179,14 @@ function labelFor(mode){
   }
 }
 
-function volToGain(v){
-  const x = Math.max(0, Math.min(1, v / 100));
-  return Math.pow(x, 1.6);
+function fixedMasterGain(){
+  // Pevná bezpečná hlasitost bez posuvníku. Na telefonu je lepší nepřepínat gain skokově.
+  return 0.34;
 }
 
 function intensity01(){
-  return Math.max(0, Math.min(1, Number(intensity.value) / 100));
+  // Pevná jemnost/podoba šumu – uživatelský posuvník je odstraněn.
+  return 0.55;
 }
 
 /* =========================
@@ -397,10 +399,11 @@ function hardMuteNow(){
 }
 
 function disconnectChain(){
-  // zastav přehrávání MP3 smyčky (pokud běží)
-  try{ fileSource?.stop(); }catch{}
-  try{ fileSource?.disconnect(); }catch{}
-  fileSource = null;
+  // zastav real smyčku s překryvem
+  if (realLoop){
+    realLoop.stop();
+    realLoop = null;
+  }
 
   // odpoj šum a presety, zastav LFO
   try{ noiseNode?.disconnect(); }catch{}
@@ -550,10 +553,109 @@ function mapModeToNoiseType(mode){
   return 0;
 }
 
-function applyVolume(){
+function applyVolume(immediate=false){
   if (!ctx || !masterGain) return;
-  const g = volToGain(Number(volume.value));
-  masterGain.gain.setValueAtTime(g, ctx.currentTime);
+  const g = fixedMasterGain();
+  const t = ctx.currentTime;
+  try{
+    masterGain.gain.cancelScheduledValues(t);
+    const cur = masterGain.gain.value;
+    masterGain.gain.setValueAtTime(Number.isFinite(cur) ? cur : 0, t);
+    if (immediate){
+      masterGain.gain.setValueAtTime(g, t);
+    } else {
+      masterGain.gain.setTargetAtTime(g, t, 0.08);
+    }
+  }catch{
+    masterGain.gain.value = g;
+  }
+}
+
+
+function startCrossfadeRealLoop(buffer, label){
+  if (!ctx || !masterGain || !buffer) return null;
+
+  const crossfade = Math.min(5.0, Math.max(1.8, buffer.duration * 0.18));
+  const segment = Math.max(1.0, buffer.duration - crossfade);
+  const layerGain = 0.82;
+  const state = {
+    stopped: false,
+    timers: [],
+    sources: [],
+    gains: [],
+    nextStart: ctx.currentTime + 0.04,
+    stop(){
+      this.stopped = true;
+      this.timers.forEach((id) => clearTimeout(id));
+      this.timers = [];
+      const now = ctx.currentTime;
+      for (const g of this.gains){
+        try{
+          g.gain.cancelScheduledValues(now);
+          g.gain.setValueAtTime(g.gain.value, now);
+          g.gain.linearRampToValueAtTime(0, now + 0.28);
+        }catch{}
+      }
+      const oldSources = this.sources.slice();
+      const oldGains = this.gains.slice();
+      setTimeout(() => {
+        oldSources.forEach((src) => {
+          try{ src.stop(); }catch{}
+          try{ src.disconnect(); }catch{}
+        });
+        oldGains.forEach((g) => { try{ g.disconnect(); }catch{}; });
+      }, 380);
+    }
+  };
+
+  function scheduleOne(when){
+    if (state.stopped) return;
+
+    const src = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    src.buffer = buffer;
+    src.loop = false;
+
+    gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.linearRampToValueAtTime(layerGain, when + crossfade);
+    gain.gain.setValueAtTime(layerGain, Math.max(when + crossfade, when + segment - 0.02));
+    gain.gain.linearRampToValueAtTime(0.0001, when + segment + crossfade);
+
+    src.connect(gain);
+    gain.connect(masterGain);
+
+    state.sources.push(src);
+    state.gains.push(gain);
+
+    try{ src.start(when, 0); }catch{}
+
+    const cleanupDelay = Math.max(0, (when + buffer.duration + 0.5 - ctx.currentTime) * 1000);
+    const cleanupId = setTimeout(() => {
+      try{ src.stop(); }catch{}
+      try{ src.disconnect(); }catch{}
+      try{ gain.disconnect(); }catch{}
+      state.sources = state.sources.filter((x) => x !== src);
+      state.gains = state.gains.filter((x) => x !== gain);
+    }, cleanupDelay);
+    state.timers.push(cleanupId);
+  }
+
+  function pump(){
+    if (state.stopped) return;
+
+    const lookAhead = ctx.currentTime + 16;
+    while (state.nextStart < lookAhead){
+      scheduleOne(state.nextStart);
+      state.nextStart += segment;
+    }
+
+    const id = setTimeout(pump, 4000);
+    state.timers.push(id);
+  }
+
+  pump();
+  setStatus(label);
+  return state;
 }
 
 function buildChainFor(mode){
@@ -566,80 +668,49 @@ function buildChainFor(mode){
   // vždy nejdřív čistě odpojit starý řetězec
   disconnectChain();
 
-// === Vodopady (real) - MP3 loop ===
 if (mode === "waterfall_real"){
-  // Buffer musi byt nacteny (zajišťuje start() / rebuildIfPlaying())
   if (!realWaterfallBuffer){
-    setStatus("Nacitam vodopady...");
+    setStatus("Načítám vodopády...");
     return;
   }
-
-  fileSource = ctx.createBufferSource();
-  fileSource.buffer = realWaterfallBuffer;
-  fileSource.loop = true;
-
-  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
-  fileSource.connect(masterGain);
-
-  try{ fileSource.start(); }catch{}
+  realLoop = startCrossfadeRealLoop(realWaterfallBuffer, "Vodopády (real)");
   return;
 }
 
-// === Moře (real) - MP3 loop ===
 if (mode === "sea_real"){
   if (!realSeaBuffer){
-    setStatus("Nacitam more...");
+    setStatus("Načítám moře...");
     return;
   }
-  fileSource = ctx.createBufferSource();
-  fileSource.buffer = realSeaBuffer;
-  fileSource.loop = true;
-
-  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
-  fileSource.connect(masterGain);
-
-  try{ fileSource.start(); }catch{}
+  realLoop = startCrossfadeRealLoop(realSeaBuffer, "Moře (real)");
   return;
 }
 
-// === Vítr (real) - MP3 loop ===
 if (mode === "wind_real"){
   if (!realWindBuffer){
-    setStatus("Nacitam vitr...");
+    setStatus("Načítám vítr...");
     return;
   }
-  fileSource = ctx.createBufferSource();
-  fileSource.buffer = realWindBuffer;
-  fileSource.loop = true;
-
-  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
-  fileSource.connect(masterGain);
-
-  try{ fileSource.start(); }catch{}
+  realLoop = startCrossfadeRealLoop(realWindBuffer, "Vítr (real)");
   return;
 }
 
-// === Vítr (real) - MP3 loop ===
 if (mode === "rain_real"){
   if (!realRainBuffer){
-    setStatus("Nacitam vitr...");
+    setStatus("Načítám déšť...");
     return;
   }
-  fileSource = ctx.createBufferSource();
-  fileSource.buffer = realRainBuffer;
-  fileSource.loop = true;
-
-  // Bez úprav zvuku: přímo do masterGain (hlasitosť)
-  fileSource.connect(masterGain);
-
-  try{ fileSource.start(); }catch{}
+  realLoop = startCrossfadeRealLoop(realRainBuffer, "Déšť (real)");
   return;
 }
-   
-  // nastavit typ + „jemnost“ (level)
-  const baseLevel = 0.18 + 0.35 * shape;
+
+// nastavit typ + „jemnost“ (level)
+  const baseLevel = 0.16 + 0.30 * shape;
   noiseNode.parameters.get("type").setValueAtTime(mapModeToNoiseType(mode), ctx.currentTime);
-  noiseNode.parameters.get("level").setValueAtTime(baseLevel, ctx.currentTime);
+  noiseNode.parameters.get("level").setTargetAtTime(baseLevel, ctx.currentTime, 0.04);
+  if (noiseNode.parameters.get("tone")){
+    noiseNode.parameters.get("tone").setTargetAtTime(shape, ctx.currentTime, 0.04);
+  }
 
   presetFilter1 = ctx.createBiquadFilter();
   presetFilter2 = ctx.createBiquadFilter();
@@ -658,24 +729,29 @@ if (mode === "rain_real"){
   presetFilter1.connect(presetFilter2);
   presetFilter2.connect(masterGain);
 
-  // LFO -> masterGain.gain
-  try{
-    lfo.connect(lfoGain);
-    lfoGain.connect(masterGain.gain);
-  }catch{}
+  // LFO už neposíláme přímo do masterGain.gain.
+  // Na některých mobilech kombinace LFO + ruční změna hlasitosti umí lupat.
+  // Jemné vlnění necháváme jen v nastavení filtrů/presetů.
 
   // Základní šumy (jemné vyhlazení)
   if (mode === "white" || mode === "pink" || mode === "brown"){
     presetFilter1.type = "lowpass";
-    presetFilter1.frequency.value = 8000 - 5500 * (1 - shape);
-    presetFilter1.Q.value = 0.2;
+
+    if (mode === "white"){
+      // Bílý šum víc jako přiložená nahrávka: méně pískavých výšek, víc měkkého středu.
+      presetFilter1.frequency.value = 4200 + 5200 * shape;
+      presetFilter1.Q.value = 0.16;
+    } else {
+      presetFilter1.frequency.value = 8000 - 5500 * (1 - shape);
+      presetFilter1.Q.value = 0.2;
+    }
 
     presetFilter2.type = "highpass";
-    presetFilter2.frequency.value = 20 + 80 * shape;
+    presetFilter2.frequency.value = mode === "white" ? 45 + 70 * shape : 20 + 80 * shape;
     presetFilter2.Q.value = 0.1;
 
     lfo.frequency.value = 0.08 + 0.22 * shape;
-    lfoGain.gain.value = 0.00 + 0.02 * shape;
+    lfoGain.gain.value = 0.0;
   }
 
   if (mode === "waterfall"){
@@ -792,7 +868,15 @@ async function stopHard(){
   // stop timer (audio stop)
   stopTimerOnly();
 
-  // absolutní ticho
+  // Krátký doběh místo tvrdého useknutí – na telefonu méně lupnutí.
+  if (masterGain){
+    const t = ctx.currentTime;
+    try{
+      masterGain.gain.cancelScheduledValues(t);
+      masterGain.gain.setTargetAtTime(0.0, t, 0.025);
+      await new Promise(r => setTimeout(r, 80));
+    }catch{}
+  }
   hardMuteNow();
   disconnectChain();
 
@@ -850,9 +934,35 @@ function loadTimerSettings(){
   }catch{}
 }
 
+
+/* =========================
+   Theme
+   ========================= */
+function applyTheme(theme){
+  const t = theme === "dark" ? "dark" : "light";
+  document.body.classList.toggle("dark", t === "dark");
+  if (themeBtn) themeBtn.textContent = t === "dark" ? "🌙" : "☀️";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", t === "dark" ? "#0f1722" : "#f6f7fb");
+  try{ localStorage.setItem("sumyTheme", t); }catch{}
+}
+
+function loadTheme(){
+  let saved = "light";
+  try{ saved = localStorage.getItem("sumyTheme") || "light"; }catch{}
+  applyTheme(saved);
+}
+
 /* =========================
    UI events
    ========================= */
+
+loadTheme();
+
+themeBtn?.addEventListener("click", () => {
+  const next = document.body.classList.contains("dark") ? "light" : "dark";
+  applyTheme(next);
+});
 
 soundBtn.addEventListener("click", () => openSoundModal());
 soundClose.addEventListener("click", () => closeSoundModal());
@@ -886,12 +996,6 @@ toggleBtn.addEventListener("click", async () => {
   }
 });
 
-intensity.addEventListener("input", () => {
-  // U „real“ nahrávek nemá jemnost/intenzita žádný vliv.
-  if (String(currentSound).endsWith("_real")) return;
-  rebuildIfPlaying();
-});
-volume.addEventListener("input", () => { if (isPlaying) applyVolume(); });
 
 // Timer: edit + swipe
 // Pozn.: Na některých mobilech (a někdy i na desktopu) se "click" na prvku s pointer událostmi
