@@ -1,4 +1,4 @@
-/* app.js – výběr zvuku + Play/Stop + časovač + světlý/tmavý režim
+/* app.js v26 – výběr zvuku + Play/Stop + časovač + světlý/tmavý režim
    Mobilní úprava:
    - odstraněné posuvníky hlasitosti a intenzity
    - real zvuky se nesmyčkují tvrdým loop=true, ale překrývají se dvě vrstvy
@@ -74,7 +74,7 @@ let pickerM = 30;
 let pickerS = 0;
 let wheelsBuilt = false;
 
-function setStatus(t){ statusEl.textContent = t; }
+function setStatus(t){ if (statusEl) statusEl.textContent = t; }
 
 function pad2(n){
   const x = Math.max(0, Math.floor(Number(n) || 0));
@@ -463,8 +463,9 @@ async function ensureRealWaterfallBuffer(){
   return realWaterfallBufferPromise;
 }
 
-function ensureRealSeaBuffer(){
+async function ensureRealSeaBuffer(){
   if (realSeaBuffer) return realSeaBuffer;
+  if (!ctx) await ensureAudio();
   if (realSeaBuffer) return realSeaBuffer;
 
   if (!realSeaBufferPromise){
@@ -488,8 +489,9 @@ function ensureRealSeaBuffer(){
   return realSeaBufferPromise;
 }
 
-function ensureRealWindBuffer(){
+async function ensureRealWindBuffer(){
   if (realWindBuffer) return realWindBuffer;
+  if (!ctx) await ensureAudio();
   if (realWindBuffer) return realWindBuffer;
 
   if (!realWindBufferPromise){
@@ -513,8 +515,9 @@ function ensureRealWindBuffer(){
   return realWindBufferPromise;
 }
 
-function ensureRealRainBuffer(){
+async function ensureRealRainBuffer(){
   if (realRainBuffer) return realRainBuffer;
+  if (!ctx) await ensureAudio();
   if (realRainBuffer) return realRainBuffer;
 
   if (!realRainBufferPromise){
@@ -851,7 +854,7 @@ async function start(){
     if (!buf) currentSound = "rain";
   }
   buildChainFor(currentSound);
-  applyVolume();
+  applyVolume(true);
 
   isPlaying = true;
   toggleBtn.textContent = "■ Stop";
@@ -910,7 +913,7 @@ if (currentSound === "rain_real"){
   if (!buf) currentSound = "rain";
 }
   buildChainFor(currentSound);
-  applyVolume();
+  applyVolume(true);
 }
 
 function saveTimerSettings(){
@@ -964,10 +967,10 @@ themeBtn?.addEventListener("click", () => {
   applyTheme(next);
 });
 
-soundBtn.addEventListener("click", () => openSoundModal());
-soundClose.addEventListener("click", () => closeSoundModal());
+soundBtn?.addEventListener("click", () => openSoundModal());
+soundClose?.addEventListener("click", () => closeSoundModal());
 
-soundModal.addEventListener("click", (e) => {
+soundModal?.addEventListener("click", (e) => {
   const b = e.target.closest("[data-sound]");
   if (!b) return;
 
@@ -986,7 +989,7 @@ soundModal.addEventListener("click", (e) => {
   rebuildIfPlaying();
 });
 
-toggleBtn.addEventListener("click", async () => {
+toggleBtn?.addEventListener("click", async () => {
   try{
     if (!isPlaying) await start();
     else await stopHard();
@@ -1002,7 +1005,7 @@ toggleBtn.addEventListener("click", async () => {
 // nemusí spolehlivě odpálit. Proto otevíráme editor na pointerup, pokud neproběhl swipe.
 if (timerDisplay){
   // klávesnice (přístupnost)
-  timerDisplay.addEventListener("keydown", (e) => {
+  timerDisplay?.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " "){
       e.preventDefault();
       openTimerModal();
@@ -1047,7 +1050,7 @@ if (timerDisplay){
     updateTimerUI();
   };
 
-  timerDisplay.addEventListener("pointerdown", (e) => {
+  timerDisplay?.addEventListener("pointerdown", (e) => {
     timerDisplay.setPointerCapture?.(e.pointerId);
     state.active = true;
     state.startY = e.clientY;
@@ -1058,7 +1061,7 @@ if (timerDisplay){
     state.moved = false;
   });
 
-  timerDisplay.addEventListener("pointermove", (e) => {
+  timerDisplay?.addEventListener("pointermove", (e) => {
     if (!state.active) return;
     const dy = e.clientY - state.startY;
     const dx = e.clientX - state.startX;
@@ -1083,7 +1086,7 @@ if (timerDisplay){
     state.active = false;
   };
 
-  timerDisplay.addEventListener("pointerup", () => {
+  timerDisplay?.addEventListener("pointerup", () => {
     // pokud to nebyl swipe/tah, otevři editor
     if (!timerDisplay._swiped && !state.moved){
       openTimerModal();
@@ -1092,7 +1095,7 @@ if (timerDisplay){
     endSwipe();
   });
 
-  timerDisplay.addEventListener("pointercancel", () => {
+  timerDisplay?.addEventListener("pointercancel", () => {
     timerDisplay._swiped = false;
     endSwipe();
   });
@@ -1100,7 +1103,7 @@ if (timerDisplay){
 
 // Timer: enable/disable
 if (timerToggle){
-  timerToggle.addEventListener("click", () => {
+  timerToggle?.addEventListener("click", () => {
     timerEnabled = !timerEnabled;
     saveTimerSettings();
     updateTimerUI();
@@ -1133,7 +1136,7 @@ if (timerOk){
 }
 
 if (timerModal){
-  timerModal.addEventListener("keydown", (e) => {
+  timerModal?.addEventListener("keydown", (e) => {
     if (e.key === "Escape"){
       e.preventDefault();
       closeTimerModal();
@@ -1164,7 +1167,7 @@ window.addEventListener("beforeinstallprompt", (e) => {
 });
 
 if (installBtn){
-  installBtn.addEventListener("click", async () => {
+  installBtn?.addEventListener("click", async () => {
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
     await deferredPrompt.userChoice;

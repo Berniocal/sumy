@@ -3,7 +3,7 @@
    - Update: pro stejné origin soubory vracíme cache hned, ale na pozadí dotahujeme novou verzi a ukládáme do cache.
    - UI může vynutit okamžitou aktivaci přes message {type:'SKIP_WAITING'}.
 */
-const CACHE_NAME = "noise-pwa-v25-crossfade-theme";
+const CACHE_NAME = "noise-pwa-v26-fixed-icons";
 const ASSETS = [
   "./",
   "./index.html",
@@ -16,7 +16,11 @@ const ASSETS = [
   "./wind-real.mp3",
   "./rain-real.mp3",
   "./icons/icon.svg",
-  "./icons/maskable.svg"
+  "./icons/maskable.svg",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png",
+  "./icons/maskable-192.png",
+  "./icons/maskable-512.png"
 ];
 
 self.addEventListener("install", (event) => {
