@@ -3,6 +3,7 @@
    - Update: pro stejné origin soubory vracíme cache hned, ale na pozadí dotahujeme novou verzi a ukládáme do cache.
    - UI může vynutit okamžitou aktivaci přes message {type:'SKIP_WAITING'}.
 */
+const CACHE_PREFIX = "noise-pwa-";
 const CACHE_NAME = "noise-pwa-v26-fixed-icons";
 const ASSETS = [
   "./",
@@ -34,7 +35,11 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.map(k => (k !== CACHE_NAME) ? caches.delete(k) : null));
+    await Promise.all(
+      keys
+        .filter(k => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
+        .map(k => caches.delete(k))
+    );
     await self.clients.claim();
   })());
 });
