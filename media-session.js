@@ -13,11 +13,13 @@
 
   const icon = new URL("icons/icon-512.png", document.baseURI).href;
 
-  // Vytvoří krátkou téměř neslyšitelnou WAV smyčku. Není muted, protože
-  // ztlumené médium Android někdy jako aktivní přehrávání vůbec nezobrazí.
+  // Chrome na Androidu žádá plný audio focus (a tedy zobrazí systémové
+  // ovládání) jen pro médium delší než 5 sekund. Použijeme proto 60s WAV.
+  // Není muted a není digitálně úplně tiché, protože takové médium může
+  // Android ignorovat. Amplituda je ale prakticky neslyšitelná.
   function createQuietWavUrl(){
     const sampleRate = 8000;
-    const seconds = 2;
+    const seconds = 60;
     const samples = sampleRate * seconds;
     const bytesPerSample = 2;
     const dataSize = samples * bytesPerSample;
@@ -41,7 +43,6 @@
     writeText(36, "data");
     view.setUint32(40, dataSize, true);
 
-    // Velmi tichý sinus, aby médium nebylo digitálně úplně prázdné.
     for (let i = 0; i < samples; i++) {
       const value = Math.round(Math.sin(2 * Math.PI * 35 * i / sampleRate) * 2);
       view.setInt16(44 + i * 2, value, true);
@@ -57,7 +58,12 @@
   mediaBridge.preload = "auto";
   mediaBridge.volume = 1;
   mediaBridge.setAttribute("playsinline", "");
-  mediaBridge.style.display = "none";
+  mediaBridge.style.position = "fixed";
+  mediaBridge.style.width = "1px";
+  mediaBridge.style.height = "1px";
+  mediaBridge.style.opacity = "0.001";
+  mediaBridge.style.pointerEvents = "none";
+  mediaBridge.style.left = "-10px";
   document.body.appendChild(mediaBridge);
 
   function currentLabel(){
@@ -110,14 +116,11 @@
     if (appIsPlaying()) toggleBtn.click();
   }
 
-  // Zachytíme uživatelský klik ještě v rámci stejného gesta. To je důležité,
-  // protože Android blokuje programové audio spuštěné až s odstupem.
+  // Capture fáze zachová přímou vazbu na uživatelský klik, kterou Android
+  // vyžaduje pro první spuštění HTML audio elementu.
   toggleBtn.addEventListener("click", () => {
-    if (!appIsPlaying()) {
-      startBridge();
-    } else {
-      stopBridge();
-    }
+    if (!appIsPlaying()) startBridge();
+    else stopBridge();
   }, true);
 
   try { navigator.mediaSession.setActionHandler("play", requestPlay); } catch {}
