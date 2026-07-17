@@ -4,7 +4,7 @@
    - UI může vynutit okamžitou aktivaci přes message {type:'SKIP_WAITING'}.
 */
 const CACHE_PREFIX = "noise-pwa-";
-const CACHE_NAME = "noise-pwa-v30-android-media-controls";
+const CACHE_NAME = "noise-pwa-v31-android-media-controls";
 const ASSETS = [
   "./",
   "./index.html",
