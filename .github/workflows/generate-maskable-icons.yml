@@ -24,20 +24,16 @@ jobs:
       - name: Install Pillow
         run: python -m pip install pillow
 
-      - name: Generate maskable icons from original icons
+      - name: Generate edge-to-edge maskable icons from original icons
         run: |
           python - <<'PY'
-          from pathlib import Path
           from PIL import Image, ImageChops
-
-          BG = (106, 167, 143, 255)  # theme_color #6aa78f
 
           def trim_uniform_border(img: Image.Image) -> Image.Image:
               rgba = img.convert('RGBA')
               corner = rgba.getpixel((0, 0))
               bg = Image.new('RGBA', rgba.size, corner)
               diff = ImageChops.difference(rgba, bg)
-              # Ignore tiny JPEG/antialiasing differences around a uniform border.
               diff = diff.point(lambda p: 0 if p < 12 else 255)
               bbox = diff.getbbox()
               return rgba.crop(bbox) if bbox else rgba
@@ -46,15 +42,23 @@ jobs:
               src = Image.open(f'icons/icon-{size}.png').convert('RGBA')
               artwork = trim_uniform_border(src)
 
-              # Keep the entire original motif inside the maskable safe zone.
-              target = round(size * 0.78)
-              artwork.thumbnail((target, target), Image.Resampling.LANCZOS)
+              # The original artwork itself is enlarged beyond the canvas edges.
+              # This removes every visible white/green/blue frame after Android
+              # applies its own rounded mask.
+              scale = max(size / artwork.width, size / artwork.height) * 1.10
+              new_size = (
+                  round(artwork.width * scale),
+                  round(artwork.height * scale),
+              )
+              artwork = artwork.resize(new_size, Image.Resampling.LANCZOS)
 
-              canvas = Image.new('RGBA', (size, size), BG)
-              x = (size - artwork.width) // 2
-              y = (size - artwork.height) // 2
-              canvas.alpha_composite(artwork, (x, y))
-              canvas.convert('RGB').save(f'icons/maskable-{size}.png', optimize=True)
+              left = (artwork.width - size) // 2
+              top = (artwork.height - size) // 2
+              result = artwork.crop((left, top, left + size, top + size))
+              result.convert('RGB').save(
+                  f'icons/maskable-{size}.png',
+                  optimize=True,
+              )
           PY
 
       - name: Commit generated icons
@@ -65,6 +69,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No icon changes"
           else
-            git commit -m "Vytvořit maskable ikony z původní ikony"
+            git commit -m "Roztáhnout maskable ikonu až k okrajům"
             git push
           fi
