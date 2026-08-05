@@ -4,12 +4,13 @@
    - UI může vynutit okamžitou aktivaci přes message {type:'SKIP_WAITING'}.
 */
 const CACHE_PREFIX = "noise-pwa-";
-const CACHE_NAME = "noise-pwa-v33-equal-power-loop";
+const CACHE_NAME = "noise-pwa-v34-remember-last-sound";
 const ASSETS = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
+  "./remember-sound.js",
   "./real-loop-fix.js",
   "./media-session.js",
   "./noise-worklet.js",
